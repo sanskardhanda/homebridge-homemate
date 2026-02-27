@@ -19,9 +19,9 @@
   "license": "MIT",
   "repository": {
   "type": "git",
-  "url": "https://github.com/Sanskar-Dhanda/homebridge-homemate.git"
+  "url": "https://github.com/SanskarDhanda/homebridge-homemate.git"
 },
-"homepage": "https://github.com/Sanskar-Dhanda/homebridge-homemate#readme",
+"homepage": "https://github.com/SanskarDhanda/homebridge-homemate#readme",
   "peerDependencies": {
     "homebridge": ">=1.3.0"
   },
