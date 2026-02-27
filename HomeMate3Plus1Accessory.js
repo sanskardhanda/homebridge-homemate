@@ -121,7 +121,7 @@ class HomeMate3Plus1Accessory {
 
   _setupTuya() {
     if (!TuyaDevice) {
-      this.log.error('homebridge-tuya-homemate: @tuyapi/local is not installed. Run: npm install @tuyapi/local');
+      this.log.error('homebridge-tuya-homemate: tuyapi is not installed. Run: npm install @tuyapi/local');
       return;
     }
 
