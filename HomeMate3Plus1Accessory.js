@@ -34,7 +34,7 @@
 
 let TuyaDevice;
 try {
-  TuyaDevice = require('@tuyapi/local');
+  TuyaDevice = require('tuyapi');
 } catch (e) {
   // Will warn at runtime
 }
