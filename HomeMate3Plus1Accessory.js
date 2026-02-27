@@ -34,7 +34,7 @@
 
 let TuyaDevice;
 try {
-  TuyaDevice = require('tuyapi');
+  TuyaDevice = require('@tuyapi/local');
 } catch (e) {
   // Will warn at runtime
 }
@@ -121,7 +121,7 @@ class HomeMate3Plus1Accessory {
 
   _setupTuya() {
     if (!TuyaDevice) {
-      this.log.error('homebridge-tuya-homemate: tuyapi is not installed. Run: npm install tuyapi');
+      this.log.error('homebridge-tuya-homemate: @tuyapi/local is not installed. Run: npm install @tuyapi/local');
       return;
     }
 
