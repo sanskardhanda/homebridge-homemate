@@ -8,12 +8,14 @@
  *   - 1 fan switch (boolean DP)
  *   - 1 fan speed (enum DP: "level_1", "level_2", "level_3", "level_4")
  *
+ * IP address is optional — if not provided, the device will be auto-discovered
+ * on your local network using tuyapi's built-in discovery.
+ *
  * Example config.json entry:
  * {
  *   "name": "Living Room Panel",
  *   "id": "YOUR_DEVICE_ID",
  *   "key": "YOUR_LOCAL_KEY",
- *   "ip": "192.168.1.XXX",
  *   "version": "3.3",
  *   "lights": [
  *     { "name": "Light 1", "dp": 1 },
@@ -27,20 +29,17 @@
  *     "speedValues": ["level_1", "level_2", "level_3", "level_4"]
  *   }
  * }
- *
- * speedValues maps to HomeKit fan speed (0-100%) in equal steps.
- * With 4 speeds: level_1=25%, level_2=50%, level_3=75%, level_4=100%
  */
 
 let TuyaDevice;
 try {
-  TuyaDevice = require('@tuyapi/local');
+  TuyaDevice = require('tuyapi');
 } catch (e) {
   // Will warn at runtime
 }
 
-const RECONNECT_DELAY = 5000; // ms
-const POLL_INTERVAL = 10000;  // ms — how often to refresh state
+const RECONNECT_DELAY = 5000;
+const POLL_INTERVAL = 10000;
 
 class HomeMate3Plus1Accessory {
   constructor(log, config, api) {
@@ -52,14 +51,10 @@ class HomeMate3Plus1Accessory {
     this.Service = Service;
     this.Characteristic = Characteristic;
 
-    // Device state cache
     this.state = {};
-
-    // Validate config
     this.lightsConfig = config.lights || [];
     this.fanConfig = config.fan || null;
 
-    // Build a single bridge accessory that contains multiple services
     const accessoryUUID = uuid.generate(config.id);
     this.accessory = new api.platformAccessory(config.name, accessoryUUID);
     this.accessory.category = api.hap.Categories.SWITCH;
@@ -79,11 +74,9 @@ class HomeMate3Plus1Accessory {
         lightCfg.name,
         `light-${lightCfg.dp}`
       );
-
       svc.getCharacteristic(Characteristic.On)
         .onGet(() => this._getLightState(lightCfg.dp))
         .onSet((value) => this._setLightState(lightCfg.dp, value));
-
       this.lightServices.push({ config: lightCfg, service: svc });
       this.log.info(`Registered light: "${lightCfg.name}" on DP ${lightCfg.dp}`);
     }
@@ -95,25 +88,19 @@ class HomeMate3Plus1Accessory {
         this.fanConfig.name,
         'fan-main'
       );
-
-      // Active (on/off)
       fanSvc.getCharacteristic(Characteristic.Active)
         .onGet(() => this._getFanActive())
         .onSet((value) => this._setFanActive(value));
-
-      // Rotation speed (0-100)
       fanSvc.getCharacteristic(Characteristic.RotationSpeed)
         .setProps({ minValue: 0, maxValue: 100, minStep: 1 })
         .onGet(() => this._getFanSpeed())
         .onSet((value) => this._setFanSpeed(value));
-
       this.fanService = fanSvc;
       this.log.info(
         `Registered fan: "${this.fanConfig.name}" switch DP ${this.fanConfig.dpSwitch}, speed DP ${this.fanConfig.dpSpeed}`
       );
     }
 
-    // --- Connect to device ---
     this._setupTuya();
   }
 
@@ -121,19 +108,23 @@ class HomeMate3Plus1Accessory {
 
   _setupTuya() {
     if (!TuyaDevice) {
-      this.log.error('homebridge-tuya-homemate: @tuyapi/local is not installed. Run: npm install @tuyapi/local');
+      this.log.error('homebridge-homemate: tuyapi is not installed. Run: npm install tuyapi');
       return;
     }
 
-    const speedValues = (this.fanConfig && this.fanConfig.speedValues) ||
-      ['level_1', 'level_2', 'level_3', 'level_4'];
-
-    this.device = new TuyaDevice({
+    // Build device options — IP is optional
+    const deviceOptions = {
       id: this.config.id,
       key: this.config.key,
-      ip: this.config.ip,
       version: this.config.version || '3.3',
-    });
+    };
+
+    // Only set IP if provided — otherwise tuyapi will auto-discover
+    if (this.config.ip) {
+      deviceOptions.ip = this.config.ip;
+    }
+
+    this.device = new TuyaDevice(deviceOptions);
 
     this.device.on('data', (data) => {
       if (!data || !data.dps) return;
@@ -154,7 +145,6 @@ class HomeMate3Plus1Accessory {
     this.device.on('connected', () => {
       this.log.info(`[${this.config.name}] Device connected.`);
       clearTimeout(this._reconnectTimer);
-      // Ask device for current state
       this.device.get({ schema: true }).catch((e) => {
         this.log.warn(`[${this.config.name}] Initial get failed:`, e.message);
       });
@@ -162,7 +152,6 @@ class HomeMate3Plus1Accessory {
 
     this._connect();
 
-    // Periodic poll to keep state fresh
     this._pollTimer = setInterval(() => {
       if (this.device && this._connected) {
         this.device.get({ schema: true }).catch(() => {});
@@ -170,14 +159,21 @@ class HomeMate3Plus1Accessory {
     }, POLL_INTERVAL);
   }
 
-  _connect() {
+  async _connect() {
     this._connected = false;
-    this.device.connect().then(() => {
+    try {
+      // If no IP provided, resolve/discover the device first
+      if (!this.config.ip) {
+        this.log.info(`[${this.config.name}] No IP set — discovering device on network...`);
+        await this.device.resolveId();
+        this.log.info(`[${this.config.name}] Device discovered.`);
+      }
+      await this.device.connect();
       this._connected = true;
-    }).catch((err) => {
+    } catch (err) {
       this.log.error(`[${this.config.name}] Connection failed:`, err.message || err);
       this._scheduleReconnect();
-    });
+    }
   }
 
   _scheduleReconnect() {
@@ -193,24 +189,17 @@ class HomeMate3Plus1Accessory {
 
   _updateState(dps) {
     const { Characteristic } = this;
-
     for (const [dpStr, value] of Object.entries(dps)) {
       const dp = parseInt(dpStr, 10);
       this.state[dp] = value;
-
-      // Update light services
       for (const { config: lightCfg, service } of this.lightServices) {
         if (dp === lightCfg.dp) {
           service.updateCharacteristic(Characteristic.On, !!value);
         }
       }
-
-      // Update fan service
       if (this.fanConfig && this.fanService) {
         if (dp === this.fanConfig.dpSwitch) {
-          const active = value
-            ? Characteristic.Active.ACTIVE
-            : Characteristic.Active.INACTIVE;
+          const active = value ? Characteristic.Active.ACTIVE : Characteristic.Active.INACTIVE;
           this.fanService.updateCharacteristic(Characteristic.Active, active);
         }
         if (dp === this.fanConfig.dpSpeed) {
@@ -256,33 +245,19 @@ class HomeMate3Plus1Accessory {
 
   async _setFanSpeed(percent) {
     const speedVal = this._percentToSpeed(percent);
-    this.log.info(
-      `[${this.config.name}] Set fan speed DP ${this.fanConfig.dpSpeed} -> ${speedVal} (${percent}%)`
-    );
+    this.log.info(`[${this.config.name}] Set fan speed DP ${this.fanConfig.dpSpeed} -> ${speedVal} (${percent}%)`);
     this.state[this.fanConfig.dpSpeed] = speedVal;
-
-    // If speed is being set and fan is off, turn it on automatically
     if (percent > 0 && !this.state[this.fanConfig.dpSwitch]) {
       this.state[this.fanConfig.dpSwitch] = true;
       await this._sendDps({
         [this.fanConfig.dpSwitch]: true,
         [this.fanConfig.dpSpeed]: speedVal,
       });
-      // Update active characteristic
-      this.fanService.updateCharacteristic(
-        this.Characteristic.Active,
-        this.Characteristic.Active.ACTIVE
-      );
+      this.fanService.updateCharacteristic(this.Characteristic.Active, this.Characteristic.Active.ACTIVE);
     } else if (percent === 0) {
-      // Setting speed to 0 turns the fan off
       this.state[this.fanConfig.dpSwitch] = false;
-      await this._sendDps({
-        [this.fanConfig.dpSwitch]: false,
-      });
-      this.fanService.updateCharacteristic(
-        this.Characteristic.Active,
-        this.Characteristic.Active.INACTIVE
-      );
+      await this._sendDps({ [this.fanConfig.dpSwitch]: false });
+      this.fanService.updateCharacteristic(this.Characteristic.Active, this.Characteristic.Active.INACTIVE);
     } else {
       await this._sendDps({ [this.fanConfig.dpSpeed]: speedVal });
     }
@@ -290,31 +265,18 @@ class HomeMate3Plus1Accessory {
 
   // ─── Speed Conversion ─────────────────────────────────────────────────────
 
-  /**
-   * Convert a Tuya speed enum string -> HomeKit percentage (1-100)
-   * "level_1" = 25%, "level_2" = 50%, "level_3" = 75%, "level_4" = 100%
-   */
   _speedToPercent(speedValue) {
     if (!speedValue) return 0;
-    const speeds = (this.fanConfig && this.fanConfig.speedValues) ||
-      ['level_1', 'level_2', 'level_3', 'level_4'];
+    const speeds = (this.fanConfig && this.fanConfig.speedValues) || ['level_1', 'level_2', 'level_3', 'level_4'];
     const idx = speeds.indexOf(speedValue);
-    if (idx === -1) return 25; // default to lowest
+    if (idx === -1) return 25;
     return Math.round(((idx + 1) / speeds.length) * 100);
   }
 
-  /**
-   * Convert HomeKit percentage -> nearest Tuya speed enum string
-   * 1-25% = level_1, 26-50% = level_2, 51-75% = level_3, 76-100% = level_4
-   */
   _percentToSpeed(percent) {
-    const speeds = (this.fanConfig && this.fanConfig.speedValues) ||
-      ['level_1', 'level_2', 'level_3', 'level_4'];
+    const speeds = (this.fanConfig && this.fanConfig.speedValues) || ['level_1', 'level_2', 'level_3', 'level_4'];
     if (percent <= 0) return speeds[0];
-    const idx = Math.min(
-      Math.ceil((percent / 100) * speeds.length) - 1,
-      speeds.length - 1
-    );
+    const idx = Math.min(Math.ceil((percent / 100) * speeds.length) - 1, speeds.length - 1);
     return speeds[Math.max(0, idx)];
   }
 
