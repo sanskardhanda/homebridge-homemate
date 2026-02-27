@@ -1,0 +1,122 @@
+{
+  "pluginAlias": "TuyaHomeMate",
+  "pluginType": "platform",
+  "singular": false,
+  "headerDisplay": "Plugin for HomeMate 3+1 switches: 3 light switches + 1 fan with speed control (Tuya local control).",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "title": "Platform Name",
+        "type": "string",
+        "default": "TuyaHomeMate",
+        "required": true
+      },
+      "devices": {
+        "title": "Devices",
+        "type": "array",
+        "items": {
+          "title": "Device",
+          "type": "object",
+          "properties": {
+            "name": {
+              "title": "Device Name",
+              "type": "string",
+              "required": true,
+              "description": "Friendly name shown in Home app"
+            },
+            "id": {
+              "title": "Tuya Device ID",
+              "type": "string",
+              "required": true,
+              "description": "The Device ID from Tuya Smart / Smart Life app"
+            },
+            "key": {
+              "title": "Local Key",
+              "type": "string",
+              "required": true,
+              "description": "The local encryption key for the device"
+            },
+            "ip": {
+              "title": "Device IP Address",
+              "type": "string",
+              "required": true,
+              "description": "Local IP address of the device on your network"
+            },
+            "version": {
+              "title": "Protocol Version",
+              "type": "string",
+              "default": "3.3",
+              "enum": ["3.1", "3.2", "3.3", "3.4"],
+              "description": "Tuya protocol version (most devices use 3.3)"
+            },
+            "manufacturer": {
+              "title": "Manufacturer",
+              "type": "string",
+              "default": "HomeMate / Tuya",
+              "description": "Shown in Home app accessory info"
+            },
+            "model": {
+              "title": "Model",
+              "type": "string",
+              "default": "HomeMate 3+1 Switch",
+              "description": "Shown in Home app accessory info"
+            },
+            "lights": {
+              "title": "Light Switches",
+              "type": "array",
+              "items": {
+                "title": "Light",
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "title": "Light Name",
+                    "type": "string",
+                    "required": true
+                  },
+                  "dp": {
+                    "title": "Data Point (DP)",
+                    "type": "integer",
+                    "required": true,
+                    "description": "The DP number that controls this light (e.g. 1, 2, 3)"
+                  }
+                }
+              }
+            },
+            "fan": {
+              "title": "Fan",
+              "type": "object",
+              "properties": {
+                "name": {
+                  "title": "Fan Name",
+                  "type": "string",
+                  "default": "Fan",
+                  "required": true
+                },
+                "dpSwitch": {
+                  "title": "Fan Switch DP",
+                  "type": "integer",
+                  "required": true,
+                  "description": "The DP number for fan on/off (e.g. 101)"
+                },
+                "dpSpeed": {
+                  "title": "Fan Speed DP",
+                  "type": "integer",
+                  "required": true,
+                  "description": "The DP number for fan speed enum (e.g. 102)"
+                },
+                "speedValues": {
+                  "title": "Speed Values",
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "default": ["level_1", "level_2", "level_3", "level_4"],
+                  "description": "Tuya speed enum values from slowest to fastest"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

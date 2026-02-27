@@ -1,0 +1,26 @@
+{
+  "name": "homebridge-tuya-homemate",
+  "version": "1.0.0",
+  "description": "Homebridge plugin for Tuya HomeMate 3+1 switch (3 lights + 1 fan with speed control)",
+  "main": "index.js",
+  "keywords": [
+    "homebridge-plugin",
+    "tuya",
+    "homemate",
+    "fan",
+    "switch",
+    "smart-home"
+  ],
+  "engines": {
+    "homebridge": ">=1.3.0",
+    "node": ">=14.0.0"
+  },
+  "author": "Your Name",
+  "license": "MIT",
+  "peerDependencies": {
+    "homebridge": ">=1.3.0"
+  },
+  "dependencies": {
+    "@tuyapi/local": "^3.0.0"
+  }
+}
