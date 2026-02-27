@@ -34,10 +34,10 @@ The 3 lights appear as individual **Switch** tiles. The fan appears as a **Fan**
 ## Installation
 
 ```bash
-npm install -g homebridge-tuya-homemate
+npm install -g homebridge-homemate
 ```
 
-Or via Homebridge UI, search for `homebridge-tuya-homemate`.
+Or via Homebridge UI, search for `homebridge-homemate`.
 
 ---
 
