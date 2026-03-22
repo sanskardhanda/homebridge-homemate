@@ -1,8 +1,9 @@
 'use strict';
 
 const HomeMate3Plus1Accessory = require('./accessories/HomeMate3Plus1Accessory');
+const RGBTWLightV2Accessory   = require('./accessories/RGBTW');
 
-const PLUGIN_NAME = 'homebridge-homemate';
+const PLUGIN_NAME   = 'homebridge-homemate';
 const PLATFORM_NAME = 'TuyaHomeMate';
 
 const HOMEMATE_LIGHTS = [
@@ -16,6 +17,11 @@ const HOMEMATE_FAN = {
   dpSwitch: 101,
   dpSpeed: 102,
   speedValues: ['level_1', 'level_2', 'level_3', 'level_4'],
+};
+
+// Add new device types here as you build them
+const CLASS_DEF = {
+  rgbtwlightv2: RGBTWLightV2Accessory,
 };
 
 module.exports = (homebridge) => {
@@ -47,16 +53,35 @@ class TuyaHomematePlatform {
         continue;
       }
 
-      const fullConfig = {
-        ...deviceConfig,
-        version: '3.3',
-        lights: HOMEMATE_LIGHTS,
-        fan: HOMEMATE_FAN,
-      };
+      const type = (deviceConfig.type || '').toLowerCase().trim();
 
-      const acc = new HomeMate3Plus1Accessory(this.log, fullConfig, this.api);
-      this.accessories.push(acc);
-      this.api.publishExternalAccessories(PLUGIN_NAME, [acc.accessory]);
+      if (type && CLASS_DEF[type]) {
+        // ── Tuya-style accessory (RGBTW bulb etc.) ──
+        // These use a different constructor signature — they receive
+        // the platform context rather than raw log/config/api args.
+        // For now we instantiate with the same simple pattern and let
+        // the accessory class handle its own TuyAPI connection.
+        this.log.info(`[${deviceConfig.name}] Initialising as type: ${type}`);
+        const AccessoryClass = CLASS_DEF[type];
+        const acc = new AccessoryClass(this.log, deviceConfig, this.api);
+        this.accessories.push(acc);
+        this.api.publishExternalAccessories(PLUGIN_NAME, [acc.accessory]);
+
+      } else {
+        // ── Default: HomeMate 3+1 panel ──
+        if (type && type !== 'homemate') {
+          this.log.warn(`[${deviceConfig.name}] Unknown type "${type}" — falling back to HomeMate 3+1`);
+        }
+        const fullConfig = {
+          ...deviceConfig,
+          version: deviceConfig.version || '3.3',
+          lights: deviceConfig.lights || HOMEMATE_LIGHTS,
+          fan:    deviceConfig.fan    || HOMEMATE_FAN,
+        };
+        const acc = new HomeMate3Plus1Accessory(this.log, fullConfig, this.api);
+        this.accessories.push(acc);
+        this.api.publishExternalAccessories(PLUGIN_NAME, [acc.accessory]);
+      }
     }
   }
 
