@@ -10,319 +10,349 @@
  *   DP 23  temp_value_v2     (integer 0–1000)
  *   DP 24  colour_data_v2    (JSON string: {"h":0–360,"s":0–1000,"v":0–1000})
  *
- * The key difference from RGBTWLightAccessory:
- *   OLD format  →  hex string  "000003e803e8"   (hhhh ssss vvvv)
- *   NEW format  →  JSON string '{"h":0,"s":1000,"v":1000}'
- *
- * Homebridge config example:
+ * Config example:
  * {
  *   "name": "Colour Bulb",
- *   "id": "YOUR_DEVICE_ID",
- *   "key": "YOUR_LOCAL_KEY",
- *   "ip":  "192.168.x.x",
+ *   "id":   "YOUR_DEVICE_ID",
+ *   "key":  "YOUR_LOCAL_KEY",
+ *   "ip":   "192.168.x.x",
  *   "version": "3.3",
- *   "type": "rgbtwlightv2",
- *   "dpPower": "20",
- *   "dpMode":  "21",
- *   "dpBrightness": "22",
- *   "dpColorTemperature": "23",
- *   "dpColor": "24"
+ *   "type": "rgbtwlightv2"
  * }
  */
 
-const BaseAccessory = require('./BaseAccessory');
-const async = require('async');
+let TuyaDevice;
+try { TuyaDevice = require('tuyapi'); } catch (e) { /* warned at runtime */ }
 
-class RGBTWLightV2Accessory extends BaseAccessory {
-    static getCategory(Categories) { return Categories.LIGHTBULB; }
-    constructor(...props) { super(...props); }
+const RECONNECT_DELAY = 5000;
+const POLL_INTERVAL   = 10000;
 
-    _registerPlatformAccessory() {
-        const { Service } = this.hap;
-        this.accessory.addService(Service.Lightbulb, this.device.context.name);
-        super._registerPlatformAccessory();
+// DP numbers for v2 schema
+const DP_POWER  = 20;
+const DP_MODE   = 21;
+const DP_BRIGHT = 22;
+const DP_TEMP   = 23;
+const DP_COLOR  = 24;
+
+// Brightness range on the bulb
+const BRIGHT_MIN = 10;
+const BRIGHT_MAX = 1000;
+
+class RGBTWLightV2Accessory {
+  constructor(log, config, api) {
+    this.log    = log;
+    this.config = config;
+    this.api    = api;
+    this.state  = {};
+
+    const { Service, Characteristic, uuid } = api.hap;
+    this.Service        = Service;
+    this.Characteristic = Characteristic;
+
+    // Allow DP overrides in config
+    this.dpPower  = parseInt(config.dpPower)            || DP_POWER;
+    this.dpMode   = parseInt(config.dpMode)             || DP_MODE;
+    this.dpBright = parseInt(config.dpBrightness)       || DP_BRIGHT;
+    this.dpTemp   = parseInt(config.dpColorTemperature) || DP_TEMP;
+    this.dpColor  = parseInt(config.dpColor)            || DP_COLOR;
+
+    // Build the platform accessory
+    const accessoryUUID = uuid.generate(config.id);
+    this.accessory = new api.platformAccessory(config.name, accessoryUUID);
+    this.accessory.category = api.hap.Categories.LIGHTBULB;
+
+    // Info service
+    this.accessory.getService(Service.AccessoryInformation)
+      .setCharacteristic(Characteristic.Manufacturer, 'Tuya')
+      .setCharacteristic(Characteristic.Model,        'RGB+TW Bulb v2')
+      .setCharacteristic(Characteristic.SerialNumber,  config.id);
+
+    // Lightbulb service
+    const svc = this.accessory.addService(Service.Lightbulb, config.name);
+
+    // On / Off
+    this._charOn = svc.getCharacteristic(Characteristic.On)
+      .onGet(() => !!this.state[this.dpPower])
+      .onSet((v) => this._send({ [this.dpPower]: !!v }));
+
+    // Brightness (1–100)
+    this._charBright = svc.getCharacteristic(Characteristic.Brightness)
+      .setProps({ minValue: 1, maxValue: 100, minStep: 1 })
+      .onGet(() => this._getBrightness())
+      .onSet((v) => this._setBrightness(v));
+
+    // Colour temperature (140–500 mireds)
+    this._charTemp = svc.getCharacteristic(Characteristic.ColorTemperature)
+      .setProps({ minValue: 140, maxValue: 500 })
+      .onGet(() => this._getTemp())
+      .onSet((v) => this._setTemp(v));
+
+    // Hue (0–360)
+    this._charHue = svc.getCharacteristic(Characteristic.Hue)
+      .onGet(() => this._getHue())
+      .onSet((v) => this._setHueSat({ h: v }));
+
+    // Saturation (0–100)
+    this._charSat = svc.getCharacteristic(Characteristic.Saturation)
+      .onGet(() => this._getSat())
+      .onSet((v) => this._setHueSat({ s: v }));
+
+    this._setupTuya();
+  }
+
+  // ══════════════════════════════════════
+  //  TUYA CONNECTION
+  // ══════════════════════════════════════
+
+  _setupTuya() {
+    if (!TuyaDevice) {
+      this.log.error(`[${this.config.name}] tuyapi not installed. Run: npm install tuyapi`);
+      return;
     }
 
-    _registerCharacteristics(dps) {
-        const { Service, Characteristic, AdaptiveLightingController } = this.hap;
-        const service = this.accessory.getService(Service.Lightbulb);
-        this._checkServiceName(service, this.device.context.name);
+    const opts = {
+      id:      this.config.id,
+      key:     this.config.key,
+      version: this.config.version || '3.3',
+    };
+    if (this.config.ip) opts.ip = this.config.ip;
 
-        // ── DP mapping — defaults match the v2 schema ──
-        this.dpPower            = this._getCustomDP(this.device.context.dpPower)            || '20';
-        this.dpMode             = this._getCustomDP(this.device.context.dpMode)             || '21';
-        this.dpBrightness       = this._getCustomDP(this.device.context.dpBrightness)       || '22';
-        this.dpColorTemperature = this._getCustomDP(this.device.context.dpColorTemperature) || '23';
-        this.dpColor            = this._getCustomDP(this.device.context.dpColor)            || '24';
+    this.device = new TuyaDevice(opts);
 
-        // v2 brightness range: 10–1000  (HomeKit: 1–100)
-        this.minBright  = this.device.context.minBrightness  || 10;
-        this.maxBright  = this.device.context.maxBrightness  || 1000;
+    this.device.on('data', (data) => {
+      if (!data || !data.dps) return;
+      this.log.debug(`[${this.config.name}] data:`, JSON.stringify(data.dps));
+      this._applyState(data.dps);
+    });
 
-        // v2 colour temperature range: 0–1000  (0=warm, 1000=cool)
-        // Note: Tuya v2 temp is INVERTED relative to v1
-        this.minTemp = this.device.context.minWhiteColor || 0;
-        this.maxTemp = this.device.context.maxWhiteColor || 1000;
+    this.device.on('error', (err) => {
+      this.log.error(`[${this.config.name}] error:`, err.message || err);
+      this._scheduleReconnect();
+    });
 
-        this.cmdWhite = 'white';
-        this.cmdColor = 'colour';
+    this.device.on('disconnected', () => {
+      this.log.warn(`[${this.config.name}] disconnected`);
+      this._scheduleReconnect();
+    });
 
-        // Parse initial colour state
-        const initialColor = this._parseColorV2(dps[this.dpColor]);
-        const isWhite = dps[this.dpMode] === this.cmdWhite;
+    this.device.on('connected', () => {
+      this.log.info(`[${this.config.name}] connected`);
+      clearTimeout(this._reconnectTimer);
+      this.device.get({ schema: true }).catch(() => {});
+    });
 
-        // ── On/Off ──
-        const characteristicOn = service.getCharacteristic(Characteristic.On)
-            .updateValue(dps[this.dpPower])
-            .on('get', this.getState.bind(this, this.dpPower))
-            .on('set', this.setState.bind(this, this.dpPower));
+    this._connect();
 
-        // ── Brightness ──
-        const characteristicBrightness = service.getCharacteristic(Characteristic.Brightness)
-            .updateValue(isWhite
-                ? this._brightTuyaToHK(dps[this.dpBrightness])
-                : initialColor.b)
-            .on('get', this.getBrightness.bind(this))
-            .on('set', this.setBrightness.bind(this));
+    this._pollTimer = setInterval(() => {
+      if (this._connected) this.device.get({ schema: true }).catch(() => {});
+    }, POLL_INTERVAL);
+  }
 
-        // ── Color Temperature ──
-        const characteristicColorTemperature = service.getCharacteristic(Characteristic.ColorTemperature)
-            .setProps({ minValue: 140, maxValue: 500 })
-            .updateValue(isWhite
-                ? this._tempTuyaToHK(dps[this.dpColorTemperature])
-                : 370)
-            .on('get', this.getColorTemperature.bind(this))
-            .on('set', this.setColorTemperature.bind(this));
-
-        // ── Hue ──
-        const characteristicHue = service.getCharacteristic(Characteristic.Hue)
-            .updateValue(isWhite ? 0 : initialColor.h)
-            .on('get', this.getHue.bind(this))
-            .on('set', this.setHue.bind(this));
-
-        // ── Saturation ──
-        const characteristicSaturation = service.getCharacteristic(Characteristic.Saturation)
-            .updateValue(isWhite ? 0 : initialColor.s)
-            .on('get', this.getSaturation.bind(this))
-            .on('set', this.setSaturation.bind(this));
-
-        // Store refs for cross-characteristic updates
-        this.characteristicHue              = characteristicHue;
-        this.characteristicSaturation       = characteristicSaturation;
-        this.characteristicColorTemperature = characteristicColorTemperature;
-        this.characteristicBrightness       = characteristicBrightness;
-
-        // ── Adaptive Lighting ──
-        if (this.adaptiveLightingSupport()) {
-            this.adaptiveLightingController = new AdaptiveLightingController(service);
-            this.accessory.configureController(this.adaptiveLightingController);
-            this.accessory.adaptiveLightingController = this.adaptiveLightingController;
-        }
-
-        // ── Device state changes → update HomeKit ──
-        this.device.on('change', (changes, state) => {
-            if (changes.hasOwnProperty(this.dpPower) && characteristicOn.value !== changes[this.dpPower]) {
-                characteristicOn.updateValue(changes[this.dpPower]);
-            }
-
-            const mode = state[this.dpMode];
-
-            if (mode === this.cmdWhite) {
-                // White mode updates
-                if (changes.hasOwnProperty(this.dpBrightness)) {
-                    const hkBright = this._brightTuyaToHK(changes[this.dpBrightness]);
-                    if (characteristicBrightness.value !== hkBright)
-                        characteristicBrightness.updateValue(hkBright);
-                }
-                if (changes.hasOwnProperty(this.dpColorTemperature)) {
-                    const hkTemp = this._tempTuyaToHK(changes[this.dpColorTemperature]);
-                    const hkColor = this.convertHomeKitColorTemperatureToHomeKitColor(hkTemp);
-                    characteristicHue.updateValue(hkColor.h);
-                    characteristicSaturation.updateValue(hkColor.s);
-                    characteristicColorTemperature.updateValue(hkTemp);
-                } else if (changes[this.dpMode]) {
-                    // Just switched to white mode — refresh temp
-                    const hkTemp = this._tempTuyaToHK(state[this.dpColorTemperature]);
-                    const hkColor = this.convertHomeKitColorTemperatureToHomeKitColor(hkTemp);
-                    characteristicHue.updateValue(hkColor.h);
-                    characteristicSaturation.updateValue(hkColor.s);
-                    characteristicColorTemperature.updateValue(hkTemp);
-                }
-            } else {
-                // Colour mode updates
-                if (changes.hasOwnProperty(this.dpColor)) {
-                    const newColor = this._parseColorV2(changes[this.dpColor]);
-                    if (characteristicBrightness.value !== newColor.b)
-                        characteristicBrightness.updateValue(newColor.b);
-                    if (characteristicHue.value !== newColor.h)
-                        characteristicHue.updateValue(newColor.h);
-                    if (characteristicSaturation.value !== newColor.s)
-                        characteristicSaturation.updateValue(newColor.s);
-                    if (characteristicColorTemperature.value !== 370)
-                        characteristicColorTemperature.updateValue(370);
-                } else if (changes[this.dpMode]) {
-                    if (characteristicColorTemperature.value !== 370)
-                        characteristicColorTemperature.updateValue(370);
-                }
-            }
-        });
+  async _connect() {
+    this._connected = false;
+    try {
+      if (!this.config.ip) {
+        this.log.info(`[${this.config.name}] discovering on network…`);
+        await this.device.resolveId();
+      }
+      await this.device.connect();
+      this._connected = true;
+    } catch (err) {
+      this.log.error(`[${this.config.name}] connect failed:`, err.message || err);
+      this._scheduleReconnect();
     }
+  }
 
-    // ══════════════════════════════════════
-    //  CONVERSION HELPERS — v2 specific
-    // ══════════════════════════════════════
+  _scheduleReconnect() {
+    this._connected = false;
+    clearTimeout(this._reconnectTimer);
+    this._reconnectTimer = setTimeout(() => this._connect(), RECONNECT_DELAY);
+  }
 
-    /** Parse colour_data_v2 JSON string → {h, s, b} in HomeKit ranges */
-    _parseColorV2(raw) {
-        if (!raw) return { h: 0, s: 100, b: 100 };
-        try {
-            const obj = typeof raw === 'string' ? JSON.parse(raw) : raw;
-            return {
-                h: Math.round(obj.h || 0),                          // 0–360 (same in both)
-                s: Math.round((obj.s || 0) / 10),                   // 0–1000 → 0–100
-                b: Math.round((obj.v || 0) / 10),                   // 0–1000 → 0–100
-            };
-        } catch {
-            return { h: 0, s: 100, b: 100 };
-        }
+  // ══════════════════════════════════════
+  //  STATE → HOMEKIT
+  // ══════════════════════════════════════
+
+  _applyState(dps) {
+    const { Characteristic } = this;
+    Object.assign(this.state, dps);
+
+    if (dps[this.dpPower] !== undefined)
+      this._charOn.updateValue(!!dps[this.dpPower]);
+
+    const mode = this.state[this.dpMode];
+
+    if (mode === 'white') {
+      if (dps[this.dpBright] !== undefined)
+        this._charBright.updateValue(this._b2hk(dps[this.dpBright]));
+      if (dps[this.dpTemp] !== undefined) {
+        const hkTemp  = this._t2hk(dps[this.dpTemp]);
+        const hkColor = this._tempToColor(hkTemp);
+        this._charTemp.updateValue(hkTemp);
+        this._charHue.updateValue(hkColor.h);
+        this._charSat.updateValue(hkColor.s);
+      }
+    } else if (mode === 'colour' || dps[this.dpColor] !== undefined) {
+      const c = this._parseColor(this.state[this.dpColor]);
+      this._charHue.updateValue(c.h);
+      this._charSat.updateValue(c.s);
+      this._charBright.updateValue(c.b);
+      this._charTemp.updateValue(370); // neutral placeholder
     }
+  }
 
-    /** Build colour_data_v2 JSON string from {h, s, b} HomeKit values */
-    _buildColorV2(h, s, b) {
-        return JSON.stringify({
-            h: Math.round(h),           // 0–360
-            s: Math.round(s * 10),      // 0–100 → 0–1000
-            v: Math.round(b * 10),      // 0–100 → 0–1000
-        });
+  // ══════════════════════════════════════
+  //  GETTERS
+  // ══════════════════════════════════════
+
+  _getBrightness() {
+    if (this.state[this.dpMode] === 'white')
+      return this._b2hk(this.state[this.dpBright] || BRIGHT_MIN);
+    return this._parseColor(this.state[this.dpColor]).b;
+  }
+
+  _getTemp() {
+    if (this.state[this.dpMode] !== 'white') return 370;
+    return this._t2hk(this.state[this.dpTemp] || 0);
+  }
+
+  _getHue() {
+    if (this.state[this.dpMode] === 'white') return 0;
+    return this._parseColor(this.state[this.dpColor]).h;
+  }
+
+  _getSat() {
+    if (this.state[this.dpMode] === 'white') return 0;
+    return this._parseColor(this.state[this.dpColor]).s;
+  }
+
+  // ══════════════════════════════════════
+  //  SETTERS
+  // ══════════════════════════════════════
+
+  async _setBrightness(hkValue) {
+    if (this.state[this.dpMode] === 'white') {
+      await this._send({ [this.dpBright]: this._hk2b(hkValue) });
+    } else {
+      const c = this._parseColor(this.state[this.dpColor]);
+      await this._send({ [this.dpColor]: this._buildColor(c.h, c.s, hkValue) });
     }
+  }
 
-    /** bright_value_v2 (10–1000) → HomeKit brightness (1–100) */
-    _brightTuyaToHK(value) {
-        const v = Math.max(this.minBright, Math.min(this.maxBright, value || this.minBright));
-        return Math.max(1, Math.round((v - this.minBright) / (this.maxBright - this.minBright) * 99 + 1));
+  async _setTemp(hkValue) {
+    const hkColor = this._tempToColor(hkValue);
+    this._charHue.updateValue(hkColor.h);
+    this._charSat.updateValue(hkColor.s);
+    await this._send({
+      [this.dpMode]: 'white',
+      [this.dpTemp]: this._hk2t(hkValue),
+    });
+  }
+
+  // Debounce hue+sat — HomeKit sends them as two separate calls
+  _setHueSat(prop) {
+    return new Promise((resolve) => {
+      if (!this._pending) this._pending = { props: {}, resolvers: [] };
+      if (this._pending.timer) clearTimeout(this._pending.timer);
+      Object.assign(this._pending.props, prop);
+      this._pending.resolvers.push(resolve);
+      this._pending.timer = setTimeout(() => this._flushHueSat(), 500);
+    });
+  }
+
+  async _flushHueSat() {
+    if (!this._pending) return;
+    const { props, resolvers } = this._pending;
+    this._pending = null;
+
+    const current = this._parseColor(this.state[this.dpColor]);
+    const h = props.h !== undefined ? props.h : current.h;
+    const s = props.s !== undefined ? props.s : current.s;
+    const b = current.b || 100;
+
+    await this._send({
+      [this.dpMode]:  'colour',
+      [this.dpColor]: this._buildColor(h, s, b),
+    });
+    resolvers.forEach(r => r());
+  }
+
+  // ══════════════════════════════════════
+  //  SEND TO DEVICE
+  // ══════════════════════════════════════
+
+  async _send(dps) {
+    Object.assign(this.state, dps);
+    if (!this.device || !this._connected) {
+      this.log.warn(`[${this.config.name}] not connected, queuing skipped`);
+      return;
     }
-
-    /** HomeKit brightness (1–100) → bright_value_v2 (10–1000) */
-    _brightHKToTuya(value) {
-        const v = Math.max(1, Math.min(100, value));
-        return Math.round((v - 1) / 99 * (this.maxBright - this.minBright) + this.minBright);
+    try {
+      await this.device.set({ multiple: true, data: dps });
+    } catch (err) {
+      this.log.error(`[${this.config.name}] send failed:`, err.message || err);
+      this._scheduleReconnect();
     }
+  }
 
-    /**
-     * temp_value_v2 (0–1000) → HomeKit color temperature (140–500 mireds)
-     * Tuya v2: 0 = warm white, 1000 = cool white
-     * HomeKit: 140 mireds = cool (6500K), 500 mireds = warm (2700K)
-     * So they are INVERTED — 0 Tuya → 500 HomeKit, 1000 Tuya → 140 HomeKit
-     */
-    _tempTuyaToHK(value) {
-        const v = Math.max(0, Math.min(1000, value || 0));
-        // Invert: Tuya 0 (warm) → HomeKit 500 (warm), Tuya 1000 (cool) → HomeKit 140 (cool)
-        return Math.round(500 - (v / 1000) * (500 - 140));
-    }
+  // ══════════════════════════════════════
+  //  CONVERSION HELPERS
+  // ══════════════════════════════════════
 
-    /** HomeKit color temperature (140–500 mireds) → temp_value_v2 (0–1000) */
-    _tempHKToTuya(value) {
-        const v = Math.max(140, Math.min(500, value));
-        // Invert: HomeKit 500 (warm) → Tuya 0, HomeKit 140 (cool) → Tuya 1000
-        return Math.round((500 - v) / (500 - 140) * 1000);
-    }
+  /** colour_data_v2 JSON → { h:0-360, s:0-100, b:0-100 } */
+  _parseColor(raw) {
+    if (!raw) return { h: 0, s: 100, b: 100 };
+    try {
+      const o = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      return {
+        h: Math.round(o.h || 0),
+        s: Math.round((o.s || 0) / 10),
+        b: Math.round((o.v || 0) / 10),
+      };
+    } catch { return { h: 0, s: 100, b: 100 }; }
+  }
 
-    // ══════════════════════════════════════
-    //  CHARACTERISTIC HANDLERS
-    // ══════════════════════════════════════
+  /** { h:0-360, s:0-100, b:0-100 } → colour_data_v2 JSON string */
+  _buildColor(h, s, b) {
+    return JSON.stringify({
+      h: Math.round(h),
+      s: Math.round(s * 10),
+      v: Math.round(b * 10),
+    });
+  }
 
-    getBrightness(callback) {
-        if (this.device.state[this.dpMode] === this.cmdWhite) {
-            return callback(null, this._brightTuyaToHK(this.device.state[this.dpBrightness]));
-        }
-        callback(null, this._parseColorV2(this.device.state[this.dpColor]).b);
-    }
+  /** Tuya bright 10-1000 → HomeKit 1-100 */
+  _b2hk(v) {
+    const clamped = Math.max(BRIGHT_MIN, Math.min(BRIGHT_MAX, v || BRIGHT_MIN));
+    return Math.max(1, Math.round((clamped - BRIGHT_MIN) / (BRIGHT_MAX - BRIGHT_MIN) * 99 + 1));
+  }
 
-    setBrightness(value, callback) {
-        if (this.device.state[this.dpMode] === this.cmdWhite) {
-            return this.setState(this.dpBrightness, this._brightHKToTuya(value), callback);
-        }
-        // Colour mode — update v value inside JSON
-        const current = this._parseColorV2(this.device.state[this.dpColor]);
-        const newColorStr = this._buildColorV2(current.h, current.s, value);
-        this.setState(this.dpColor, newColorStr, callback);
-    }
+  /** HomeKit 1-100 → Tuya bright 10-1000 */
+  _hk2b(v) {
+    return Math.round((Math.max(1, Math.min(100, v)) - 1) / 99 * (BRIGHT_MAX - BRIGHT_MIN) + BRIGHT_MIN);
+  }
 
-    getColorTemperature(callback) {
-        if (this.device.state[this.dpMode] !== this.cmdWhite) return callback(null, 370);
-        callback(null, this._tempTuyaToHK(this.device.state[this.dpColorTemperature]));
-    }
+  /**
+   * Tuya temp 0-1000 → HomeKit mireds 140-500
+   * Tuya 0 = warm, 1000 = cool  (inverted vs HomeKit)
+   * HomeKit 500 = warm, 140 = cool
+   */
+  _t2hk(v) {
+    return Math.round(500 - (Math.max(0, Math.min(1000, v)) / 1000) * 360);
+  }
 
-    setColorTemperature(value, callback) {
-        const hkColor = this.convertHomeKitColorTemperatureToHomeKitColor(value);
-        this.characteristicHue.updateValue(hkColor.h);
-        this.characteristicSaturation.updateValue(hkColor.s);
-        this.setMultiState({
-            [this.dpMode]: this.cmdWhite,
-            [this.dpColorTemperature]: this._tempHKToTuya(value),
-        }, callback);
-    }
+  /** HomeKit mireds 140-500 → Tuya temp 0-1000 */
+  _hk2t(v) {
+    return Math.round((500 - Math.max(140, Math.min(500, v))) / 360 * 1000);
+  }
 
-    getHue(callback) {
-        if (this.device.state[this.dpMode] === this.cmdWhite) return callback(null, 0);
-        callback(null, this._parseColorV2(this.device.state[this.dpColor]).h);
-    }
-
-    setHue(value, callback) { this._setHueSaturation({ h: value }, callback); }
-
-    getSaturation(callback) {
-        if (this.device.state[this.dpMode] === this.cmdWhite) return callback(null, 0);
-        callback(null, this._parseColorV2(this.device.state[this.dpColor]).s);
-    }
-
-    setSaturation(value, callback) { this._setHueSaturation({ s: value }, callback); }
-
-    /**
-     * Batches hue + saturation changes together with a 500ms debounce.
-     * HomeKit sends them as two separate calls — we wait for both before
-     * writing to the device, otherwise the bulb flickers mid-transition.
-     */
-    _setHueSaturation(prop, callback) {
-        if (!this._pendingHueSaturation) this._pendingHueSaturation = { props: {}, callbacks: [] };
-
-        if (prop) {
-            if (this._pendingHueSaturation.timer) clearTimeout(this._pendingHueSaturation.timer);
-            this._pendingHueSaturation.props = { ...this._pendingHueSaturation.props, ...prop };
-            this._pendingHueSaturation.callbacks.push(callback);
-            this._pendingHueSaturation.timer = setTimeout(() => { this._setHueSaturation(); }, 500);
-            return;
-        }
-
-        const callbacks = this._pendingHueSaturation.callbacks;
-        const callEachBack = err => {
-            async.eachSeries(callbacks, (cb, next) => {
-                try { cb(err); } catch (ex) {}
-                next();
-            }, () => {
-                this.characteristicColorTemperature.updateValue(370);
-            });
-        };
-
-        const isSham = this._pendingHueSaturation.props.h === 0 && this._pendingHueSaturation.props.s === 0;
-        const pending = this._pendingHueSaturation.props;
-        this._pendingHueSaturation = null;
-
-        // If in white mode and user didn't really pick a colour, skip
-        if (this.device.state[this.dpMode] === this.cmdWhite && isSham) return callEachBack();
-
-        // Merge pending hue/sat with current brightness from device state
-        const current = this._parseColorV2(this.device.state[this.dpColor]);
-        const h = pending.h !== undefined ? pending.h : current.h;
-        const s = pending.s !== undefined ? pending.s : current.s;
-        const b = current.b || 100;
-
-        const newColorStr = this._buildColorV2(h, s, b);
-
-        this.setMultiState({
-            [this.dpMode]: this.cmdColor,
-            [this.dpColor]: newColorStr,
-        }, callEachBack);
-    }
+  /** HomeKit mireds → approximate { h, s } for hue/sat display */
+  _tempToColor(mireds) {
+    const kelvin = 1000000 / mireds;
+    // Very rough warm=yellow, cool=white approximation
+    const warmth = Math.max(0, Math.min(1, (kelvin - 2700) / (6500 - 2700)));
+    return { h: Math.round(40 * (1 - warmth)), s: Math.round(30 * (1 - warmth)) };
+  }
 }
 
 module.exports = RGBTWLightV2Accessory;
