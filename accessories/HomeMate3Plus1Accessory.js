@@ -342,26 +342,69 @@ class HomeMate3Plus1Accessory {
       return;
     }
 
+    const devId = String(this.config.id).trim();
+    const normalizedDps = {};
+
+    for (const [dp, value] of Object.entries(dps)) {
+      normalizedDps[String(dp)] = value;
+    }
+
+    let lastError = null;
+
     try {
-      this.log.debug(`[${this.config.name}] Sending DPs ${JSON.stringify(dps)}`);
+      this.log.debug(`[${this.config.name}] Sending DPS batch ${JSON.stringify(normalizedDps)}`);
 
       await this.device.set({
         multiple: true,
-        data: dps,
+        data: normalizedDps,
+        devId,
         shouldWaitForResponse: false,
       });
     } catch (err) {
+      lastError = err;
       const msg = err && err.message ? err.message : String(err);
 
       if (msg.includes('Timeout waiting for status response')) {
         this.log.warn(
-          `[${this.config.name}] Status response timeout; command may still have been sent: ${msg}`,
+          `[${this.config.name}] Batch status response timeout; trying single-DP fallback: ${msg}`,
         );
+      } else {
+        this.log.warn(`[${this.config.name}] Batch DPS send failed; trying single-DP fallback: ${msg}`);
+      }
+    }
+
+    for (const [dp, value] of Object.entries(normalizedDps)) {
+      try {
+        this.log.debug(`[${this.config.name}] Sending single DP ${dp} -> ${value}`);
+
+        await this.device.set({
+          dps: Number(dp),
+          set: value,
+          devId,
+          shouldWaitForResponse: false,
+        });
+      } catch (err) {
+        lastError = err;
+        const msg = err && err.message ? err.message : String(err);
+
+        if (msg.includes('Timeout waiting for status response')) {
+          this.log.warn(
+            `[${this.config.name}] Single DP ${dp} status response timeout; command may still have been sent: ${msg}`,
+          );
+          continue;
+        }
+
+        this.log.error(`[${this.config.name}] Failed to send DP ${dp}: ${msg}`);
+        this._scheduleReconnect();
         return;
       }
+    }
 
-      this.log.error(`[${this.config.name}] Failed to send DPS: ${msg}`);
-      this._scheduleReconnect();
+    if (lastError) {
+      const msg = lastError && lastError.message ? lastError.message : String(lastError);
+      if (!msg.includes('Timeout waiting for status response')) {
+        this.log.warn(`[${this.config.name}] DPS send completed with fallback after: ${msg}`);
+      }
     }
   }
 }
