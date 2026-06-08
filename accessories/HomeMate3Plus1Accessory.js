@@ -352,6 +352,16 @@ class HomeMate3Plus1Accessory {
     let lastError = null;
 
     try {
+      this.log.debug(`[${this.config.name}] Sending raw LAN DPS ${JSON.stringify(normalizedDps)}`);
+      await this._sendRawControlDps(normalizedDps);
+      return;
+    } catch (err) {
+      lastError = err;
+      const msg = err && err.message ? err.message : String(err);
+      this.log.warn(`[${this.config.name}] Raw LAN DPS send failed; trying TuyAPI fallback: ${msg}`);
+    }
+
+    try {
       this.log.debug(`[${this.config.name}] Sending DPS batch ${JSON.stringify(normalizedDps)}`);
 
       await this.device.set({
@@ -406,6 +416,51 @@ class HomeMate3Plus1Accessory {
         this.log.warn(`[${this.config.name}] DPS send completed with fallback after: ${msg}`);
       }
     }
+  }
+
+  async _sendRawControlDps(dps) {
+    if (!this.device || !this.device.device || !this.device.device.parser) {
+      throw new Error('TuyAPI internals unavailable');
+    }
+
+    await this.device.connect();
+
+    if (!this.device.client || !this.device.client.writable) {
+      throw new Error('TuyAPI socket is not writable');
+    }
+
+    const version = String(this.config.version || this.device.device.version || '3.3');
+    const t = Math.round(Date.now() / 1000).toString();
+    let payload = {
+      devId: String(this.config.id).trim(),
+      uid: '',
+      t,
+      dps,
+    };
+
+    if (version === '3.4' || version === '3.5') {
+      payload = {
+        data: {
+          devId: String(this.config.id).trim(),
+          uid: '',
+          ctype: 0,
+          dps,
+        },
+        protocol: 5,
+        t,
+      };
+    }
+
+    const commandByte = version === '3.4' || version === '3.5' ? 13 : 7;
+    const sequenceN = ++this.device._currentSequenceN;
+    const buffer = this.device.device.parser.encode({
+      data: payload,
+      encrypted: true,
+      commandByte,
+      sequenceN,
+    });
+
+    this.device.client.write(buffer);
   }
 }
 
