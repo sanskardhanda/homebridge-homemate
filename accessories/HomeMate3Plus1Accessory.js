@@ -114,8 +114,12 @@ class HomeMate3Plus1Accessory {
     });
 
     this.device.on('error', (err) => {
-      this.log.error(`[${this.config.name}] Device error:`, err.message || err);
-      this._scheduleReconnect();
+      const msg = err && err.message ? err.message : String(err);
+      this.log.warn(`[${this.config.name}] Device error:`, msg);
+
+      if (!msg.includes('Timeout waiting for status response')) {
+        this._scheduleReconnect();
+      }
     });
 
     this.device.on('disconnected', () => {
@@ -197,9 +201,17 @@ class HomeMate3Plus1Accessory {
   }
 
   async _setLightState(dp, value) {
-    this.log.info(`[${this.config.name}] Set light DP ${dp} -> ${value}`);
-    this.state[dp] = value;
-    await this._sendDps({ [dp]: !!value });
+    const on = !!value;
+
+    this.log.info(`[${this.config.name}] Set light DP ${dp} -> ${on}`);
+
+    if (this.state[dp] === on) {
+      this.log.debug(`[${this.config.name}] Light DP ${dp} already ${on}; skipping DPS write.`);
+      return;
+    }
+
+    this.state[dp] = on;
+    await this._sendDps({ [dp]: on });
   }
 
   // ─── Fan Handlers ─────────────────────────────────────────────────────────
@@ -213,7 +225,16 @@ class HomeMate3Plus1Accessory {
   async _setFanActive(value) {
     const { Characteristic } = this;
     const on = value === Characteristic.Active.ACTIVE;
+
     this.log.info(`[${this.config.name}] Set fan switch DP ${this.fanConfig.dpSwitch} -> ${on}`);
+
+    if (this.state[this.fanConfig.dpSwitch] === on) {
+      this.log.debug(
+        `[${this.config.name}] Fan switch DP ${this.fanConfig.dpSwitch} already ${on}; skipping DPS write.`,
+      );
+      return;
+    }
+
     this.state[this.fanConfig.dpSwitch] = on;
     await this._sendDps({ [this.fanConfig.dpSwitch]: on });
   }
@@ -226,6 +247,19 @@ class HomeMate3Plus1Accessory {
   async _setFanSpeed(percent) {
     const speedVal = this._percentToSpeed(percent);
     this.log.info(`[${this.config.name}] Set fan speed DP ${this.fanConfig.dpSpeed} -> ${speedVal} (${percent}%)`);
+
+    if (percent <= 0 && this.state[this.fanConfig.dpSwitch] === false) {
+      this.log.debug(`[${this.config.name}] Fan already off; skipping DPS write.`);
+      return;
+    }
+
+    if (percent > 0 && this.state[this.fanConfig.dpSwitch] && this.state[this.fanConfig.dpSpeed] === speedVal) {
+      this.log.debug(
+        `[${this.config.name}] Fan speed DP ${this.fanConfig.dpSpeed} already ${speedVal}; skipping DPS write.`,
+      );
+      return;
+    }
+
     this.state[this.fanConfig.dpSpeed] = speedVal;
     if (percent > 0 && !this.state[this.fanConfig.dpSwitch]) {
       this.state[this.fanConfig.dpSwitch] = true;
@@ -276,7 +310,17 @@ class HomeMate3Plus1Accessory {
     try {
       await this.device.set({ multiple: true, data: dps });
     } catch (err) {
-      this.log.error(`[${this.config.name}] Failed to send DPS:`, err.message || err);
+      const msg = err && err.message ? err.message : String(err);
+
+      if (msg.includes('Timeout waiting for status response')) {
+        this.log.warn(
+          `[${this.config.name}] Status response timeout after DPS write; keeping connection: ${msg}`,
+        );
+        this.device.get({ schema: true }).catch(() => {});
+        return;
+      }
+
+      this.log.error(`[${this.config.name}] Failed to send DPS:`, msg);
       this._scheduleReconnect();
     }
   }
