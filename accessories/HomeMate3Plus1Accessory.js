@@ -10,25 +10,6 @@
  *
  * IP address is optional — if not provided, the device will be auto-discovered
  * on your local network using tuyapi's built-in discovery.
- *
- * Example config.json entry:
- * {
- *   "name": "Living Room Panel",
- *   "id": "YOUR_DEVICE_ID",
- *   "key": "YOUR_LOCAL_KEY",
- *   "version": "3.3",
- *   "lights": [
- *     { "name": "Light 1", "dp": 1 },
- *     { "name": "Light 2", "dp": 2 },
- *     { "name": "Light 3", "dp": 3 }
- *   ],
- *   "fan": {
- *     "name": "Ceiling Fan",
- *     "dpSwitch": 101,
- *     "dpSpeed": 102,
- *     "speedValues": ["level_1", "level_2", "level_3", "level_4"]
- *   }
- * }
  */
 
 let TuyaDevice;
@@ -112,14 +93,12 @@ class HomeMate3Plus1Accessory {
       return;
     }
 
-    // Build device options — IP is optional
     const deviceOptions = {
       id: String(this.config.id).trim(),
       key: String(this.config.key),
       version: String(this.config.version || '3.3'),
     };
 
-    // Only set IP if provided — otherwise tuyapi will auto-discover
     if (this.config.ip) {
       deviceOptions.ip = this.config.ip;
     }
@@ -132,9 +111,13 @@ class HomeMate3Plus1Accessory {
       this._updateState(data.dps);
     });
 
+    // Only schedule reconnect for real errors, not status-response timeouts
     this.device.on('error', (err) => {
-      this.log.error(`[${this.config.name}] Device error:`, err.message || err);
-      this._scheduleReconnect();
+      const msg = err.message || String(err);
+      this.log.warn(`[${this.config.name}] Device error: ${msg}`);
+      if (!msg.includes('Timeout waiting for status response')) {
+        this._scheduleReconnect();
+      }
     });
 
     this.device.on('disconnected', () => {
@@ -145,7 +128,8 @@ class HomeMate3Plus1Accessory {
     this.device.on('connected', () => {
       this.log.info(`[${this.config.name}] Device connected.`);
       clearTimeout(this._reconnectTimer);
-      this.device.get({ schema: true }).catch((e) => {
+      // Use plain get() — schema: true causes extra round-trips this device doesn't ack
+      this.device.get().catch((e) => {
         this.log.warn(`[${this.config.name}] Initial get failed:`, e.message);
       });
     });
@@ -154,7 +138,7 @@ class HomeMate3Plus1Accessory {
 
     this._pollTimer = setInterval(() => {
       if (this.device && this._connected) {
-        this.device.get({ schema: true }).catch(() => {});
+        this.device.get().catch(() => {});
       }
     }, POLL_INTERVAL);
   }
@@ -162,7 +146,6 @@ class HomeMate3Plus1Accessory {
   async _connect() {
     this._connected = false;
     try {
-      // If no IP provided, resolve/discover the device first
       if (!this.config.ip) {
         this.log.info(`[${this.config.name}] No IP set — discovering device on network...`);
         await this.device.find();
@@ -288,10 +271,19 @@ class HomeMate3Plus1Accessory {
       return;
     }
     try {
-      await this.device.set({ multiple: true, data: dps });
+      // shouldWaitForResponse: false — this device does not reliably send a
+      // status ack after set(). Without this flag tuyapi times out and throws,
+      // which was incorrectly being treated as a connection failure.
+      await this.device.set({ multiple: true, data: dps, shouldWaitForResponse: false });
     } catch (err) {
-      this.log.error(`[${this.config.name}] Failed to send DPS:`, err.message || err);
-      this._scheduleReconnect();
+      const msg = err.message || String(err);
+      if (msg.includes('Timeout waiting for status response')) {
+        // Command was sent; device just didn't ack. Not fatal.
+        this.log.warn(`[${this.config.name}] Status response timeout (command likely sent): ${msg}`);
+      } else {
+        this.log.error(`[${this.config.name}] Failed to send DPS: ${msg}`);
+        this._scheduleReconnect();
+      }
     }
   }
 }
