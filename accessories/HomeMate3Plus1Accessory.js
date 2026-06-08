@@ -126,6 +126,7 @@ class HomeMate3Plus1Accessory {
       }
 
       this.log.debug(`[${this.config.name}] Received data: ${JSON.stringify(data.dps)}`);
+      this._connected = true;
       this._updateState(data.dps);
     });
 
@@ -341,31 +342,14 @@ class HomeMate3Plus1Accessory {
       return;
     }
 
-    const keys = Object.keys(dps);
-
     try {
-      if (keys.length === 1) {
-        const dp = parseInt(keys[0], 10);
-        const value = dps[keys[0]];
+      this.log.debug(`[${this.config.name}] Sending DPs ${JSON.stringify(dps)}`);
 
-        this.log.debug(`[${this.config.name}] Sending single DP ${dp} -> ${value}`);
-
-        // Single DP writes should use the normal TuyAPI set frame.
-        // Some Tuya 3.3 devices ignore single-DP commands sent with multiple: true.
-        await this.device.set({
-          dps: dp,
-          set: value,
-          shouldWaitForResponse: false,
-        });
-      } else {
-        this.log.debug(`[${this.config.name}] Sending multiple DPs ${JSON.stringify(dps)}`);
-
-        await this.device.set({
-          multiple: true,
-          data: dps,
-          shouldWaitForResponse: false,
-        });
-      }
+      await this.device.set({
+        multiple: true,
+        data: dps,
+        shouldWaitForResponse: false,
+      });
     } catch (err) {
       const msg = err && err.message ? err.message : String(err);
 
