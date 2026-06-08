@@ -2,15 +2,14 @@
   "pluginAlias": "TuyaHomeMate",
   "pluginType": "platform",
   "singular": false,
-  "headerDisplay": "Plugin for HomeMate 3+1 switches: 3 light switches + 1 fan with speed control (Tuya local control).",
+  "headerDisplay": "Local LAN control for HomeMate 3+1 Tuya switch/fan panels. The local key is used exactly as entered, so symbol keys are supported.",
   "schema": {
     "type": "object",
     "properties": {
       "name": {
         "title": "Platform Name",
         "type": "string",
-        "default": "TuyaHomeMate",
-        "required": true
+        "default": "TuyaHomeMate"
       },
       "devices": {
         "title": "Devices",
@@ -18,24 +17,187 @@
         "items": {
           "title": "Device",
           "type": "object",
+          "required": [
+            "name",
+            "id",
+            "key",
+            "ip"
+          ],
           "properties": {
+            "type": {
+              "title": "Accessory Type",
+              "type": "string",
+              "default": "homemate",
+              "oneOf": [
+                {
+                  "title": "HomeMate 3+1 Switch/Fan Panel",
+                  "enum": [
+                    "homemate"
+                  ]
+                },
+                {
+                  "title": "RGB+TW Bulb v2",
+                  "enum": [
+                    "rgbtwlightv2"
+                  ]
+                }
+              ]
+            },
             "name": {
               "title": "Device Name",
               "type": "string",
-              "required": true,
-              "description": "Friendly name shown in Home app"
+              "description": "Friendly name shown in the Home app."
             },
             "id": {
               "title": "Tuya Device ID",
               "type": "string",
-              "required": true,
-              "description": "The Device ID from Tuya Smart / Smart Life app"
+              "description": "The local Tuya device ID."
             },
             "key": {
               "title": "Local Key",
               "type": "string",
-              "required": true,
-              "description": "The local encryption key for the device"
+              "description": "The Tuya local key. Enter it exactly as provided; do not escape, trim, or convert symbol keys."
+            },
+            "ip": {
+              "title": "IP Address",
+              "type": "string",
+              "description": "The device LAN IP address. Use a DHCP reservation so it stays fixed."
+            },
+            "port": {
+              "title": "Port",
+              "type": "integer",
+              "default": 6668,
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "version": {
+              "title": "Tuya Protocol Version",
+              "type": "string",
+              "default": "3.3",
+              "oneOf": [
+                {
+                  "title": "3.1",
+                  "enum": [
+                    "3.1"
+                  ]
+                },
+                {
+                  "title": "3.2",
+                  "enum": [
+                    "3.2"
+                  ]
+                },
+                {
+                  "title": "3.3",
+                  "enum": [
+                    "3.3"
+                  ]
+                },
+                {
+                  "title": "3.4",
+                  "enum": [
+                    "3.4"
+                  ]
+                },
+                {
+                  "title": "3.5",
+                  "enum": [
+                    "3.5"
+                  ]
+                }
+              ]
+            },
+            "manufacturer": {
+              "title": "Manufacturer",
+              "type": "string",
+              "default": "HomeMate / Tuya"
+            },
+            "model": {
+              "title": "Model",
+              "type": "string",
+              "default": "HomeMate 3+1 Switch"
+            },
+            "sendEmptyUpdate": {
+              "title": "Send Empty Update Signature",
+              "type": "boolean",
+              "default": false,
+              "description": "Enable only for devices that require an empty follow-up control frame after a DP write."
+            },
+            "lights": {
+              "title": "HomeMate Light Switches",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "dp"
+                ],
+                "properties": {
+                  "name": {
+                    "title": "Light Name",
+                    "type": "string"
+                  },
+                  "dp": {
+                    "title": "Switch DP",
+                    "type": "integer",
+                    "default": 1
+                  }
+                }
+              }
+            },
+            "fan": {
+              "title": "HomeMate Fan",
+              "type": "object",
+              "properties": {
+                "name": {
+                  "title": "Fan Name",
+                  "type": "string",
+                  "default": "Fan"
+                },
+                "dpSwitch": {
+                  "title": "Fan Switch DP",
+                  "type": "integer",
+                  "default": 101
+                },
+                "dpSpeed": {
+                  "title": "Fan Speed DP",
+                  "type": "integer",
+                  "default": 102
+                },
+                "speedValues": {
+                  "title": "Fan Speed Values",
+                  "type": "array",
+                  "default": [
+                    "level_1",
+                    "level_2",
+                    "level_3",
+                    "level_4"
+                  ],
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "dpPower": {
+              "title": "RGBTW Power DP",
+              "type": "integer",
+              "default": 20
+            },
+            "dpBrightness": {
+              "title": "RGBTW Brightness DP",
+              "type": "integer",
+              "default": 22
+            },
+            "dpColorTemperature": {
+              "title": "RGBTW Color Temperature DP",
+              "type": "integer",
+              "default": 23
+            },
+            "dpColor": {
+              "title": "RGBTW Color DP",
+              "type": "integer",
+              "default": 24
             }
           }
         }

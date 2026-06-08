@@ -1,35 +1,37 @@
 # homebridge-homemate
 
-A Homebridge plugin to add local support for **HomeMate 3+1 switches** — 3 light switches + 1 fan with 4-speed control — devices that aren't supported by the main homebridge-tuya plugin.
+Homebridge plugin for local LAN control of HomeMate 3+1 Tuya switch/fan panels.
 
-This solves the problem described in [homebridge-tuya issue #311](https://github.com/iRayanKhan/homebridge-tuya/issues/311).
+The main supported accessory is a HomeMate wall panel with:
 
----
+| DP | Type | Description |
+| --- | --- | --- |
+| 1 | boolean | Light switch 1 |
+| 2 | boolean | Light switch 2 |
+| 3 | boolean | Light switch 3 |
+| 101 | boolean | Fan on/off |
+| 102 | enum | Fan speed |
 
-## How it works
+The three lights appear as individual HomeKit Switch services. The fan appears as a Fan service with an on/off control and a rotation-speed slider.
 
-Your HomeMate wall switch has these Data Points (DPs):
+## What Changed In 1.1.0
 
-| DP  | Type    | Description          |
-|-----|---------|----------------------|
-| 1   | boolean | Light switch 1       |
-| 2   | boolean | Light switch 2       |
-| 3   | boolean | Light switch 3       |
-| 101 | boolean | Fan on/off           |
-| 102 | enum    | Fan speed (level_1–4)|
+Version 1.1.0 uses an internal Tuya LAN client for the HomeMate panel instead of relying on `tuyapi.set()` acknowledgements. This matters for HomeMate/Tuya panels that read state correctly but do not reliably return the status response expected by `tuyapi` after a command.
 
-HomeKit doesn't have a native "4-speed fan enum" — so this plugin maps the enum to a **0–100% rotation speed slider** in Home app:
+The LAN client sends raw Tuya control frames:
 
-| Tuya value | HomeKit % |
-|------------|-----------|
-| level_1    | 25%       |
-| level_2    | 50%       |
-| level_3    | 75%       |
-| level_4    | 100%      |
+| Protocol | Control command |
+| --- | --- |
+| 3.1 / 3.2 / 3.3 | DP update command 7 |
+| 3.4 / 3.5 | DP update command 13 with protocol wrapper |
 
-The 3 lights appear as individual **Switch** tiles. The fan appears as a **Fan** tile with an on/off toggle and speed slider.
+Local keys are treated as raw strings. Keys containing symbols are supported and must be entered exactly as provided.
 
----
+## Compatibility
+
+- Homebridge: `^1.8.0` or `^2.0.0`
+- Node.js: `^22.12.0` or `^24.0.0`
+- Tuya LAN protocol versions: `3.1`, `3.2`, `3.3`, `3.4`, `3.5`
 
 ## Installation
 
@@ -37,24 +39,22 @@ The 3 lights appear as individual **Switch** tiles. The fan appears as a **Fan**
 npm install -g homebridge-homemate
 ```
 
-Or via Homebridge UI, search for `homebridge-homemate`.
+Or install `homebridge-homemate` from the Homebridge UI.
 
----
+## Getting Device Details
 
-## Prerequisites: Get Your Device ID and Local Key
+You need:
 
-You need your device's **ID** and **local key** to use local control. Follow the [instructions from homebridge-tuya](https://github.com/AMoo-Miki/homebridge-tuya-lan/wiki/Setup-Instructions).
+- Tuya device ID
+- Tuya local key
+- Device LAN IP address
+- Tuya protocol version, usually `3.3` for this panel unless your discovery tool reports another version
 
-The short version:
-1. Set up the device in the Tuya Smart or Smart Life app
-2. Use [tuyapi/cli](https://github.com/TuyaAPI/cli) or scan with [LocalTuya HACS addon](https://github.com/rospogrigio/localtuya) to get the ID and key
-3. Find the device IP in your router's DHCP table (set a static lease so it doesn't change)
+Use the Tuya IoT platform, a supported local key tool, or your existing Homebridge/Tuya workflow to obtain the ID and key. Reserve the device IP in your router so it does not change.
 
----
+Important: do not trim, escape, convert, or validate the local key as hex. Tuya local keys can contain symbols such as quotes, angle brackets, ampersands, and backticks.
 
 ## Configuration
-
-Add to your `config.json` (or use Homebridge UI):
 
 ```json
 {
@@ -64,6 +64,7 @@ Add to your `config.json` (or use Homebridge UI):
       "name": "TuyaHomeMate",
       "devices": [
         {
+          "type": "homemate",
           "name": "Living Room Panel",
           "id": "YOUR_DEVICE_ID",
           "key": "YOUR_LOCAL_KEY",
@@ -72,9 +73,9 @@ Add to your `config.json` (or use Homebridge UI):
           "manufacturer": "HomeMate",
           "model": "3+1 Wall Switch",
           "lights": [
-            { "name": "Main Light",    "dp": 1 },
-            { "name": "Side Light",    "dp": 2 },
-            { "name": "Accent Light",  "dp": 3 }
+            { "name": "Main Light", "dp": 1 },
+            { "name": "Side Light", "dp": 2 },
+            { "name": "Accent Light", "dp": 3 }
           ],
           "fan": {
             "name": "Ceiling Fan",
@@ -89,70 +90,55 @@ Add to your `config.json` (or use Homebridge UI):
 }
 ```
 
-### Config options
+## Config Options
 
 | Field | Required | Description |
-|-------|----------|-------------|
-| `name` | ✓ | Display name of the device in Home app |
-| `id` | ✓ | Tuya device ID |
-| `key` | ✓ | Local encryption key |
-| `ip` | ✓ | Local IP address of the device |
-| `version` | | Protocol version: `"3.1"`, `"3.2"`, `"3.3"` (default), `"3.4"` |
-| `lights` | | Array of `{ name, dp }` for each light switch |
-| `fan.name` | | Name for the fan accessory |
-| `fan.dpSwitch` | | DP number for fan on/off (boolean) |
-| `fan.dpSpeed` | | DP number for fan speed (enum) |
-| `fan.speedValues` | | Array of enum strings from slow→fast. Default: `["level_1","level_2","level_3","level_4"]` |
-
----
-
-## Different speed values?
-
-Some devices use different strings. Check your device's actual DP values using:
-
-```bash
-npx @tuyapi/cli wizard
-```
-
-Or look at your Homebridge logs — when the device connects, all DP values are logged. Then update `speedValues` to match exactly what your device sends. For example some devices use `"1"`, `"2"`, `"3"`, `"4"` as plain numbers.
-
----
+| --- | --- | --- |
+| `type` | No | Use `homemate` for the HomeMate 3+1 panel. Defaults to `homemate`. |
+| `name` | Yes | Display name in HomeKit. |
+| `id` | Yes | Tuya device ID. |
+| `key` | Yes | Tuya local key, used exactly as entered. |
+| `ip` | Yes | Device LAN IP address. |
+| `port` | No | Tuya LAN port. Defaults to `6668`. |
+| `version` | No | Tuya protocol version: `3.1`, `3.2`, `3.3`, `3.4`, or `3.5`. Defaults to `3.3`. |
+| `sendEmptyUpdate` | No | Sends an empty follow-up control frame after DP writes. Leave off unless your device specifically needs it. |
+| `lights` | No | Array of `{ "name": "...", "dp": 1 }` switch definitions. Defaults to DP 1, 2, and 3. |
+| `fan.dpSwitch` | No | Fan on/off DP. Defaults to `101`. |
+| `fan.dpSpeed` | No | Fan speed enum DP. Defaults to `102`. |
+| `fan.speedValues` | No | Speed enum values from slow to fast. Defaults to `["level_1","level_2","level_3","level_4"]`. |
 
 ## Troubleshooting
 
-**Device won't connect**
-- Make sure the IP is correct and the device is on the same network as Homebridge
-- Try setting a static DHCP lease for the device
-- Check the protocol version (most new devices use `3.3`, some newer ones `3.4`)
+### Device reads state but commands do not work
 
-**Fan shows wrong speed**
-- Enable debug logging in Homebridge and check the raw DP values
-- Update `speedValues` in your config to match exactly what your device reports
+Check the configured `version` first. Reads and writes use different Tuya LAN commands on newer protocol versions, so a device can appear readable while rejecting control frames if the version is wrong.
 
-**Lights work but fan doesn't**
-- Verify your `dpSwitch` and `dpSpeed` DPs using the Tuya app or tuyapi/cli
+For this HomeMate panel, the expected cloud property mapping is:
 
----
+| Code | DP | Value type |
+| --- | --- | --- |
+| `switch_1` | 1 | boolean |
+| `switch_2` | 2 | boolean |
+| `switch_3` | 3 | boolean |
+| `switch_fan` | 101 | boolean |
+| `fan_speed_enum` | 102 | enum, usually `level_1` to `level_4` |
 
-## Testing with your device
+If your Tuya Cloud properties show different DPs or speed enum strings, update the plugin config to match.
 
-Since you have the device to test, here's how to verify DPs quickly:
+### Device does not connect
 
-```bash
-# Install tuyapi/cli globally
-npm install -g @tuyapi/cli
+- Confirm the IP address is correct and reachable from the Homebridge host.
+- Confirm the device is on the same LAN/VLAN as Homebridge.
+- Confirm the local key is current. Re-adding the device to Tuya/HomeMate changes the local key.
+- Enter symbol keys exactly as provided. Do not add escaping unless JSON itself requires it.
 
-# Get device status (raw DPs)
-npx @tuyapi/cli get --id YOUR_ID --key YOUR_KEY --ip 192.168.1.123
+### Fan speed jumps around
 
-# Set a specific DP (e.g. turn on fan)
-npx @tuyapi/cli set --id YOUR_ID --key YOUR_KEY --ip 192.168.1.123 --dps 101 --set true
+HomeKit often sends multiple speed writes while dragging the slider. The plugin debounces speed-only writes and sends the final requested speed, while fan on/off and light switch commands are sent immediately.
 
-# Set fan speed
-npx @tuyapi/cli set --id YOUR_ID --key YOUR_KEY --ip 192.168.1.123 --dps 102 --set "level_2"
-```
+## Changelog
 
----
+See [CHANGELOG.md](./CHANGELOG.md).
 
 ## License
 

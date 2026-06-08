@@ -21,11 +21,11 @@
  * }
  */
 
-let TuyaDevice;
-try { TuyaDevice = require('tuyapi'); } catch (e) { /* warned at runtime */ }
+const TuyaLanDevice = require('../lib/TuyaLanDevice');
 
 const RECONNECT_DELAY = 5000;
 const POLL_INTERVAL   = 10000;
+const COMMAND_GAP     = 150;
 
 // DP numbers for v2 schema
 const DP_POWER  = 20;
@@ -44,6 +44,10 @@ class RGBTWLightV2Accessory {
     this.config = config;
     this.api    = api;
     this.state  = {};
+    this._connected = false;
+    this._commandQueue = Promise.resolve();
+    this._pollTimer = null;
+    this._reconnectTimer = null;
 
     const { Service, Characteristic, uuid } = api.hap;
     this.Service        = Service;
@@ -105,58 +109,56 @@ class RGBTWLightV2Accessory {
   // ══════════════════════════════════════
 
   _setupTuya() {
-    if (!TuyaDevice) {
-      this.log.error(`[${this.config.name}] tuyapi not installed. Run: npm install tuyapi`);
+    if (!this.config.ip) {
+      this.log.error(`[${this.config.name}] Manual IP is required for reliable Tuya LAN control.`);
       return;
     }
 
     const opts = {
-      id:      this.config.id,
-      key:     this.config.key,
-      version: this.config.version || '3.3',
+      name: this.config.name,
+      id: String(this.config.id).trim(),
+      key: String(this.config.key),
+      version: String(this.config.version || '3.3'),
+      ip: String(this.config.ip).trim(),
+      port: Number(this.config.port || 6668),
+      log: this.log,
+      sendEmptyUpdate: !!this.config.sendEmptyUpdate,
     };
-    if (this.config.ip) opts.ip = this.config.ip;
 
-    this.device = new TuyaDevice(opts);
+    this.device = new TuyaLanDevice(opts);
 
-    this.device.on('data', (data) => {
-      if (!data || !data.dps) return;
-      this.log.debug(`[${this.config.name}] data:`, JSON.stringify(data.dps));
-      this._applyState(data.dps);
+    this.device.on('connect', () => {
+      this.log.info(`[${this.config.name}] connected`);
+      this._connected = true;
+      clearTimeout(this._reconnectTimer);
+    });
+
+    this.device.on('change', (changes, state) => {
+      this.log.debug(`[${this.config.name}] data:`, JSON.stringify(changes));
+      this._applyState(state);
+    });
+
+    this.device.on('disconnect', () => {
+      this.log.warn(`[${this.config.name}] disconnected`);
+      this._connected = false;
     });
 
     this.device.on('error', (err) => {
-      this.log.error(`[${this.config.name}] error:`, err.message || err);
-      this._scheduleReconnect();
-    });
-
-    this.device.on('disconnected', () => {
-      this.log.warn(`[${this.config.name}] disconnected`);
-      this._scheduleReconnect();
-    });
-
-    this.device.on('connected', () => {
-      this.log.info(`[${this.config.name}] connected`);
-      clearTimeout(this._reconnectTimer);
-      this.device.get({ schema: true }).catch(() => {});
+      this._connected = false;
+      this.log.warn(`[${this.config.name}] error:`, err && err.message ? err.message : err);
     });
 
     this._connect();
 
     this._pollTimer = setInterval(() => {
-      if (this._connected) this.device.get({ schema: true }).catch(() => {});
+      if (this._connected) this.device.update();
     }, POLL_INTERVAL);
   }
 
-  async _connect() {
+  _connect() {
     this._connected = false;
     try {
-      if (!this.config.ip) {
-        this.log.info(`[${this.config.name}] discovering on network…`);
-        await this.device.resolveId();
-      }
-      await this.device.connect();
-      this._connected = true;
+      this.device.connect();
     } catch (err) {
       this.log.error(`[${this.config.name}] connect failed:`, err.message || err);
       this._scheduleReconnect();
@@ -282,17 +284,32 @@ class RGBTWLightV2Accessory {
   // ══════════════════════════════════════
 
   async _send(dps) {
-    Object.assign(this.state, dps);
     if (!this.device || !this._connected) {
-      this.log.warn(`[${this.config.name}] not connected, queuing skipped`);
+      this.log.warn(`[${this.config.name}] not connected, command skipped`);
       return;
     }
-    try {
-      await this.device.set({ multiple: true, data: dps });
-    } catch (err) {
-      this.log.error(`[${this.config.name}] send failed:`, err.message || err);
+
+    this._commandQueue = this._commandQueue
+      .catch(() => {})
+      .then(() => this._writeDps(dps));
+
+    return this._commandQueue;
+  }
+
+  async _writeDps(dps) {
+    const normalized = {};
+    for (const [dp, value] of Object.entries(dps)) {
+      normalized[String(dp)] = value;
+    }
+
+    const sent = this.device.update(normalized);
+    if (!sent) {
+      this.log.warn(`[${this.config.name}] DPS write was not sent; device socket is not connected.`);
+      this._connected = false;
       this._scheduleReconnect();
     }
+
+    await new Promise((resolve) => setTimeout(resolve, COMMAND_GAP));
   }
 
   // ══════════════════════════════════════

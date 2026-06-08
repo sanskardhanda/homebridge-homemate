@@ -60,7 +60,7 @@ class TuyaHomematePlatform {
         // These use a different constructor signature — they receive
         // the platform context rather than raw log/config/api args.
         // For now we instantiate with the same simple pattern and let
-        // the accessory class handle its own TuyAPI connection.
+        // the accessory class handle its own LAN connection.
         this.log.info(`[${deviceConfig.name}] Initialising as type: ${type}`);
         const AccessoryClass = CLASS_DEF[type];
         const acc = new AccessoryClass(this.log, deviceConfig, this.api);

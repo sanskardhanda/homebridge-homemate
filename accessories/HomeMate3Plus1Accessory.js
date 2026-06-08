@@ -1,26 +1,11 @@
 'use strict';
 
-/**
- * HomeMate3Plus1Accessory
- *
- * Supports the HomeMate 3+1 wall switch:
- *   - 3 light switches (boolean DPs)
- *   - 1 fan switch (boolean DP)
- *   - 1 fan speed (enum DP: "level_1", "level_2", "level_3", "level_4")
- *
- * IP address is optional — if not provided, the device will be auto-discovered
- * on your local network using tuyapi's built-in discovery.
- */
-
-let TuyaDevice;
-try {
-  TuyaDevice = require('tuyapi');
-} catch (e) {
-  // Will warn at runtime
-}
+const TuyaLanDevice = require('../lib/TuyaLanDevice');
 
 const RECONNECT_DELAY = 5000;
 const POLL_INTERVAL = 10000;
+const COMMAND_GAP = 150;
+const FAN_SPEED_DEBOUNCE = 250;
 
 class HomeMate3Plus1Accessory {
   constructor(log, config, api) {
@@ -33,6 +18,13 @@ class HomeMate3Plus1Accessory {
     this.Characteristic = Characteristic;
 
     this.state = {};
+    this._connected = false;
+    this._commandQueue = Promise.resolve();
+    this._pollTimer = null;
+    this._reconnectTimer = null;
+    this._fanSpeedTimer = null;
+    this._fanSpeedResolve = null;
+    this._pendingFanSpeedDps = null;
     this.lightsConfig = config.lights || [];
     this.fanConfig = config.fan || null;
 
@@ -88,72 +80,59 @@ class HomeMate3Plus1Accessory {
   // ─── Tuya Connection ──────────────────────────────────────────────────────
 
   _setupTuya() {
-    if (!TuyaDevice) {
-      this.log.error('homebridge-homemate: tuyapi is not installed. Run: npm install tuyapi');
+    if (!this.config.ip) {
+      this.log.error(`[${this.config.name}] Manual IP is required for reliable HomeMate LAN control.`);
       return;
     }
 
     const deviceOptions = {
+      name: this.config.name,
       id: String(this.config.id).trim(),
       key: String(this.config.key),
       version: String(this.config.version || '3.3'),
+      ip: String(this.config.ip).trim(),
+      port: Number(this.config.port || 6668),
+      log: this.log,
+      sendEmptyUpdate: !!this.config.sendEmptyUpdate,
     };
 
-    if (this.config.ip) {
-      deviceOptions.ip = this.config.ip;
-    }
+    this.device = new TuyaLanDevice(deviceOptions);
 
-    this.device = new TuyaDevice(deviceOptions);
+    this.device.on('connect', () => {
+      this.log.info(`[${this.config.name}] Device connected.`);
+      this._connected = true;
+      clearTimeout(this._reconnectTimer);
+    });
 
-    this.device.on('data', (data) => {
-      if (!data || !data.dps) {
-        return;
-      }
-      this.log.debug(`[${this.config.name}] Received data:`, JSON.stringify(data.dps));
-      this._updateState(data.dps);
+    this.device.on('change', (changes, state) => {
+      this.log.debug(`[${this.config.name}] Received data:`, JSON.stringify(changes));
+      this._updateState(state);
+    });
+
+    this.device.on('disconnect', () => {
+      this.log.warn(`[${this.config.name}] Device disconnected. Reconnecting...`);
+      this._connected = false;
     });
 
     this.device.on('error', (err) => {
-      const msg = err && err.message ? err.message : String(err);
-      this.log.warn(`[${this.config.name}] Device error:`, msg);
-
-      if (!msg.includes('Timeout waiting for status response')) {
-        this._scheduleReconnect();
-      }
-    });
-
-    this.device.on('disconnected', () => {
-      this.log.warn(`[${this.config.name}] Device disconnected. Reconnecting...`);
-      this._scheduleReconnect();
-    });
-
-    this.device.on('connected', () => {
-      this.log.info(`[${this.config.name}] Device connected.`);
-      clearTimeout(this._reconnectTimer);
-      this.device.get({ schema: true }).catch((e) => {
-        this.log.warn(`[${this.config.name}] Initial get failed:`, e.message);
-      });
+      this._connected = false;
+      this.log.warn(`[${this.config.name}] Device error:`, err && err.message ? err.message : err);
     });
 
     this._connect();
 
     this._pollTimer = setInterval(() => {
       if (this.device && this._connected) {
-        this.device.get({ schema: true }).catch(() => {});
+        this.device.update();
       }
     }, POLL_INTERVAL);
   }
 
-  async _connect() {
+  _connect() {
     this._connected = false;
+
     try {
-      if (!this.config.ip) {
-        this.log.info(`[${this.config.name}] No IP set — discovering device on network...`);
-        await this.device.find();
-        this.log.info(`[${this.config.name}] Device discovered.`);
-      }
-      await this.device.connect();
-      this._connected = true;
+      this.device.connect();
     } catch (err) {
       this.log.error(`[${this.config.name}] Connection failed:`, err.message || err);
       this._scheduleReconnect();
@@ -163,6 +142,7 @@ class HomeMate3Plus1Accessory {
   _scheduleReconnect() {
     this._connected = false;
     clearTimeout(this._reconnectTimer);
+
     this._reconnectTimer = setTimeout(() => {
       this.log.info(`[${this.config.name}] Attempting reconnect...`);
       this._connect();
@@ -210,7 +190,6 @@ class HomeMate3Plus1Accessory {
       return;
     }
 
-    this.state[dp] = on;
     await this._sendDps({ [dp]: on });
   }
 
@@ -235,7 +214,6 @@ class HomeMate3Plus1Accessory {
       return;
     }
 
-    this.state[this.fanConfig.dpSwitch] = on;
     await this._sendDps({ [this.fanConfig.dpSwitch]: on });
   }
 
@@ -260,20 +238,17 @@ class HomeMate3Plus1Accessory {
       return;
     }
 
-    this.state[this.fanConfig.dpSpeed] = speedVal;
     if (percent > 0 && !this.state[this.fanConfig.dpSwitch]) {
-      this.state[this.fanConfig.dpSwitch] = true;
       await this._sendDps({
         [this.fanConfig.dpSwitch]: true,
         [this.fanConfig.dpSpeed]: speedVal,
       });
       this.fanService.updateCharacteristic(this.Characteristic.Active, this.Characteristic.Active.ACTIVE);
     } else if (percent === 0) {
-      this.state[this.fanConfig.dpSwitch] = false;
       await this._sendDps({ [this.fanConfig.dpSwitch]: false });
       this.fanService.updateCharacteristic(this.Characteristic.Active, this.Characteristic.Active.INACTIVE);
     } else {
-      await this._sendDps({ [this.fanConfig.dpSpeed]: speedVal });
+      await this._scheduleFanSpeedDps({ [this.fanConfig.dpSpeed]: speedVal });
     }
   }
 
@@ -302,27 +277,60 @@ class HomeMate3Plus1Accessory {
 
   // ─── Send DPS ─────────────────────────────────────────────────────────────
 
+  _scheduleFanSpeedDps(dps) {
+    this._pendingFanSpeedDps = dps;
+
+    if (this._fanSpeedTimer) {
+      clearTimeout(this._fanSpeedTimer);
+    }
+
+    if (this._fanSpeedResolve) {
+      this._fanSpeedResolve();
+    }
+
+    return new Promise((resolve) => {
+      this._fanSpeedResolve = resolve;
+      this._fanSpeedTimer = setTimeout(async () => {
+        const pending = this._pendingFanSpeedDps;
+        this._pendingFanSpeedDps = null;
+        this._fanSpeedTimer = null;
+        this._fanSpeedResolve = null;
+
+        await this._sendDps(pending);
+        resolve();
+      }, FAN_SPEED_DEBOUNCE);
+    });
+  }
+
   async _sendDps(dps) {
     if (!this.device || !this._connected) {
       this.log.warn(`[${this.config.name}] Device not connected, cannot send DPS.`);
       return;
     }
-    try {
-      await this.device.set({ multiple: true, data: dps });
-    } catch (err) {
-      const msg = err && err.message ? err.message : String(err);
 
-      if (msg.includes('Timeout waiting for status response')) {
-        this.log.warn(
-          `[${this.config.name}] Status response timeout after DPS write; keeping connection: ${msg}`,
-        );
-        this.device.get({ schema: true }).catch(() => {});
-        return;
-      }
+    this._commandQueue = this._commandQueue
+      .catch(() => {})
+      .then(() => this._writeDps(dps));
 
-      this.log.error(`[${this.config.name}] Failed to send DPS:`, msg);
+    return this._commandQueue;
+  }
+
+  async _writeDps(dps) {
+    const normalized = {};
+    for (const [dp, value] of Object.entries(dps)) {
+      normalized[String(dp)] = value;
+    }
+
+    this.log.debug(`[${this.config.name}] Sending DPS:`, JSON.stringify(normalized));
+
+    const sent = this.device.update(normalized);
+    if (!sent) {
+      this.log.warn(`[${this.config.name}] DPS write was not sent; device socket is not connected.`);
+      this._connected = false;
       this._scheduleReconnect();
     }
+
+    await new Promise((resolve) => setTimeout(resolve, COMMAND_GAP));
   }
 }
 
