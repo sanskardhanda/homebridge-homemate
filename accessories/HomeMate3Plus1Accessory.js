@@ -4,15 +4,16 @@
  * HomeMate3Plus1Accessory
  *
  * Supports the HomeMate 3+1 wall switch:
- *   - 3 light switches (boolean DPs)
- *   - 1 fan switch (boolean DP)
- *   - 1 fan speed (enum DP: "level_1", "level_2", "level_3", "level_4")
+ * - 3 light switches (boolean DPs)
+ * - 1 fan switch (boolean DP)
+ * - 1 fan speed (enum DP: "level_1", "level_2", "level_3", "level_4")
  *
  * IP address is optional — if not provided, the device will be auto-discovered
  * on your local network using tuyapi's built-in discovery.
  */
 
 let TuyaDevice;
+
 try {
   TuyaDevice = require('tuyapi');
 } catch (e) {
@@ -29,10 +30,14 @@ class HomeMate3Plus1Accessory {
     this.api = api;
 
     const { Service, Characteristic, uuid } = api.hap;
+
     this.Service = Service;
     this.Characteristic = Characteristic;
-
     this.state = {};
+    this._connected = false;
+    this._reconnectTimer = null;
+    this._pollTimer = null;
+
     this.lightsConfig = config.lights || [];
     this.fanConfig = config.fan || null;
 
@@ -49,15 +54,18 @@ class HomeMate3Plus1Accessory {
 
     // --- Light Switch Services ---
     this.lightServices = [];
+
     for (const lightCfg of this.lightsConfig) {
       const svc = this.accessory.addService(
         Service.Switch,
         lightCfg.name,
-        `light-${lightCfg.dp}`
+        `light-${lightCfg.dp}`,
       );
+
       svc.getCharacteristic(Characteristic.On)
         .onGet(() => this._getLightState(lightCfg.dp))
         .onSet((value) => this._setLightState(lightCfg.dp, value));
+
       this.lightServices.push({ config: lightCfg, service: svc });
       this.log.info(`Registered light: "${lightCfg.name}" on DP ${lightCfg.dp}`);
     }
@@ -67,18 +75,22 @@ class HomeMate3Plus1Accessory {
       const fanSvc = this.accessory.addService(
         Service.Fanv2,
         this.fanConfig.name,
-        'fan-main'
+        'fan-main',
       );
+
       fanSvc.getCharacteristic(Characteristic.Active)
         .onGet(() => this._getFanActive())
         .onSet((value) => this._setFanActive(value));
+
       fanSvc.getCharacteristic(Characteristic.RotationSpeed)
         .setProps({ minValue: 0, maxValue: 100, minStep: 1 })
         .onGet(() => this._getFanSpeed())
         .onSet((value) => this._setFanSpeed(value));
+
       this.fanService = fanSvc;
+
       this.log.info(
-        `Registered fan: "${this.fanConfig.name}" switch DP ${this.fanConfig.dpSwitch}, speed DP ${this.fanConfig.dpSpeed}`
+        `Registered fan: "${this.fanConfig.name}" switch DP ${this.fanConfig.dpSwitch}, speed DP ${this.fanConfig.dpSpeed}`,
       );
     }
 
@@ -93,28 +105,36 @@ class HomeMate3Plus1Accessory {
       return;
     }
 
+    // IMPORTANT:
+    // Do not trim the key. New Tuya local keys may contain symbols.
     const deviceOptions = {
       id: String(this.config.id).trim(),
       key: String(this.config.key),
       version: String(this.config.version || '3.3'),
     };
 
-    if (this.config.ip) {
-      deviceOptions.ip = this.config.ip;
+    // IP is optional. If absent, tuyapi discovery will be used.
+    if (this.config.ip && String(this.config.ip).trim()) {
+      deviceOptions.ip = String(this.config.ip).trim();
     }
 
     this.device = new TuyaDevice(deviceOptions);
 
     this.device.on('data', (data) => {
-      if (!data || !data.dps) return;
-      this.log.debug(`[${this.config.name}] Received data:`, JSON.stringify(data.dps));
+      if (!data || !data.dps) {
+        return;
+      }
+
+      this.log.debug(`[${this.config.name}] Received data: ${JSON.stringify(data.dps)}`);
       this._updateState(data.dps);
     });
 
-    // Only schedule reconnect for real errors, not status-response timeouts
     this.device.on('error', (err) => {
-      const msg = err.message || String(err);
+      const msg = err && err.message ? err.message : String(err);
       this.log.warn(`[${this.config.name}] Device error: ${msg}`);
+
+      // Some Tuya/HomeMate panels do not reliably send status acks.
+      // Do not tear down a working TCP connection only because status ack timed out.
       if (!msg.includes('Timeout waiting for status response')) {
         this._scheduleReconnect();
       }
@@ -127,10 +147,12 @@ class HomeMate3Plus1Accessory {
 
     this.device.on('connected', () => {
       this.log.info(`[${this.config.name}] Device connected.`);
+      this._connected = true;
       clearTimeout(this._reconnectTimer);
-      // Use plain get() — schema: true causes extra round-trips this device doesn't ack
+
+      // Plain get() is safer for this panel than get({ schema: true }).
       this.device.get().catch((e) => {
-        this.log.warn(`[${this.config.name}] Initial get failed:`, e.message);
+        this.log.warn(`[${this.config.name}] Initial get failed: ${e.message || e}`);
       });
     });
 
@@ -138,6 +160,7 @@ class HomeMate3Plus1Accessory {
 
     this._pollTimer = setInterval(() => {
       if (this.device && this._connected) {
+        // Plain get() avoids schema/status timeout issues on some HomeMate/Tuya devices.
         this.device.get().catch(() => {});
       }
     }, POLL_INTERVAL);
@@ -145,16 +168,19 @@ class HomeMate3Plus1Accessory {
 
   async _connect() {
     this._connected = false;
+
     try {
+      // If no IP provided, discover the device first.
       if (!this.config.ip) {
         this.log.info(`[${this.config.name}] No IP set — discovering device on network...`);
         await this.device.find();
         this.log.info(`[${this.config.name}] Device discovered.`);
       }
+
       await this.device.connect();
       this._connected = true;
     } catch (err) {
-      this.log.error(`[${this.config.name}] Connection failed:`, err.message || err);
+      this.log.error(`[${this.config.name}] Connection failed: ${err.message || err}`);
       this._scheduleReconnect();
     }
   }
@@ -162,6 +188,7 @@ class HomeMate3Plus1Accessory {
   _scheduleReconnect() {
     this._connected = false;
     clearTimeout(this._reconnectTimer);
+
     this._reconnectTimer = setTimeout(() => {
       this.log.info(`[${this.config.name}] Attempting reconnect...`);
       this._connect();
@@ -172,19 +199,23 @@ class HomeMate3Plus1Accessory {
 
   _updateState(dps) {
     const { Characteristic } = this;
+
     for (const [dpStr, value] of Object.entries(dps)) {
       const dp = parseInt(dpStr, 10);
       this.state[dp] = value;
+
       for (const { config: lightCfg, service } of this.lightServices) {
         if (dp === lightCfg.dp) {
           service.updateCharacteristic(Characteristic.On, !!value);
         }
       }
+
       if (this.fanConfig && this.fanService) {
         if (dp === this.fanConfig.dpSwitch) {
           const active = value ? Characteristic.Active.ACTIVE : Characteristic.Active.INACTIVE;
           this.fanService.updateCharacteristic(Characteristic.Active, active);
         }
+
         if (dp === this.fanConfig.dpSpeed) {
           const pct = this._speedToPercent(value);
           this.fanService.updateCharacteristic(Characteristic.RotationSpeed, pct);
@@ -201,7 +232,8 @@ class HomeMate3Plus1Accessory {
 
   async _setLightState(dp, value) {
     this.log.info(`[${this.config.name}] Set light DP ${dp} -> ${value}`);
-    this.state[dp] = value;
+    this.state[dp] = !!value;
+
     await this._sendDps({ [dp]: !!value });
   }
 
@@ -210,14 +242,17 @@ class HomeMate3Plus1Accessory {
   _getFanActive() {
     const { Characteristic } = this;
     const on = !!this.state[this.fanConfig.dpSwitch];
+
     return on ? Characteristic.Active.ACTIVE : Characteristic.Active.INACTIVE;
   }
 
   async _setFanActive(value) {
     const { Characteristic } = this;
     const on = value === Characteristic.Active.ACTIVE;
+
     this.log.info(`[${this.config.name}] Set fan switch DP ${this.fanConfig.dpSwitch} -> ${on}`);
     this.state[this.fanConfig.dpSwitch] = on;
+
     await this._sendDps({ [this.fanConfig.dpSwitch]: on });
   }
 
@@ -228,19 +263,34 @@ class HomeMate3Plus1Accessory {
 
   async _setFanSpeed(percent) {
     const speedVal = this._percentToSpeed(percent);
-    this.log.info(`[${this.config.name}] Set fan speed DP ${this.fanConfig.dpSpeed} -> ${speedVal} (${percent}%)`);
+
+    this.log.info(
+      `[${this.config.name}] Set fan speed DP ${this.fanConfig.dpSpeed} -> ${speedVal} (${percent}%)`,
+    );
+
     this.state[this.fanConfig.dpSpeed] = speedVal;
+
     if (percent > 0 && !this.state[this.fanConfig.dpSwitch]) {
       this.state[this.fanConfig.dpSwitch] = true;
+
       await this._sendDps({
         [this.fanConfig.dpSwitch]: true,
         [this.fanConfig.dpSpeed]: speedVal,
       });
-      this.fanService.updateCharacteristic(this.Characteristic.Active, this.Characteristic.Active.ACTIVE);
+
+      this.fanService.updateCharacteristic(
+        this.Characteristic.Active,
+        this.Characteristic.Active.ACTIVE,
+      );
     } else if (percent === 0) {
       this.state[this.fanConfig.dpSwitch] = false;
+
       await this._sendDps({ [this.fanConfig.dpSwitch]: false });
-      this.fanService.updateCharacteristic(this.Characteristic.Active, this.Characteristic.Active.INACTIVE);
+
+      this.fanService.updateCharacteristic(
+        this.Characteristic.Active,
+        this.Characteristic.Active.INACTIVE,
+      );
     } else {
       await this._sendDps({ [this.fanConfig.dpSpeed]: speedVal });
     }
@@ -249,17 +299,37 @@ class HomeMate3Plus1Accessory {
   // ─── Speed Conversion ─────────────────────────────────────────────────────
 
   _speedToPercent(speedValue) {
-    if (!speedValue) return 0;
-    const speeds = (this.fanConfig && this.fanConfig.speedValues) || ['level_1', 'level_2', 'level_3', 'level_4'];
+    if (!speedValue) {
+      return 0;
+    }
+
+    const speeds =
+      (this.fanConfig && this.fanConfig.speedValues) ||
+      ['level_1', 'level_2', 'level_3', 'level_4'];
+
     const idx = speeds.indexOf(speedValue);
-    if (idx === -1) return 25;
+
+    if (idx === -1) {
+      return 25;
+    }
+
     return Math.round(((idx + 1) / speeds.length) * 100);
   }
 
   _percentToSpeed(percent) {
-    const speeds = (this.fanConfig && this.fanConfig.speedValues) || ['level_1', 'level_2', 'level_3', 'level_4'];
-    if (percent <= 0) return speeds[0];
-    const idx = Math.min(Math.ceil((percent / 100) * speeds.length) - 1, speeds.length - 1);
+    const speeds =
+      (this.fanConfig && this.fanConfig.speedValues) ||
+      ['level_1', 'level_2', 'level_3', 'level_4'];
+
+    if (percent <= 0) {
+      return speeds[0];
+    }
+
+    const idx = Math.min(
+      Math.ceil((percent / 100) * speeds.length) - 1,
+      speeds.length - 1,
+    );
+
     return speeds[Math.max(0, idx)];
   }
 
@@ -270,20 +340,44 @@ class HomeMate3Plus1Accessory {
       this.log.warn(`[${this.config.name}] Device not connected, cannot send DPS.`);
       return;
     }
+
+    const keys = Object.keys(dps);
+
     try {
-      // shouldWaitForResponse: false — this device does not reliably send a
-      // status ack after set(). Without this flag tuyapi times out and throws,
-      // which was incorrectly being treated as a connection failure.
-      await this.device.set({ multiple: true, data: dps, shouldWaitForResponse: false });
-    } catch (err) {
-      const msg = err.message || String(err);
-      if (msg.includes('Timeout waiting for status response')) {
-        // Command was sent; device just didn't ack. Not fatal.
-        this.log.warn(`[${this.config.name}] Status response timeout (command likely sent): ${msg}`);
+      if (keys.length === 1) {
+        const dp = parseInt(keys[0], 10);
+        const value = dps[keys[0]];
+
+        this.log.debug(`[${this.config.name}] Sending single DP ${dp} -> ${value}`);
+
+        // Single DP writes should use the normal TuyAPI set frame.
+        // Some Tuya 3.3 devices ignore single-DP commands sent with multiple: true.
+        await this.device.set({
+          dps: dp,
+          set: value,
+          shouldWaitForResponse: false,
+        });
       } else {
-        this.log.error(`[${this.config.name}] Failed to send DPS: ${msg}`);
-        this._scheduleReconnect();
+        this.log.debug(`[${this.config.name}] Sending multiple DPs ${JSON.stringify(dps)}`);
+
+        await this.device.set({
+          multiple: true,
+          data: dps,
+          shouldWaitForResponse: false,
+        });
       }
+    } catch (err) {
+      const msg = err && err.message ? err.message : String(err);
+
+      if (msg.includes('Timeout waiting for status response')) {
+        this.log.warn(
+          `[${this.config.name}] Status response timeout; command may still have been sent: ${msg}`,
+        );
+        return;
+      }
+
+      this.log.error(`[${this.config.name}] Failed to send DPS: ${msg}`);
+      this._scheduleReconnect();
     }
   }
 }
