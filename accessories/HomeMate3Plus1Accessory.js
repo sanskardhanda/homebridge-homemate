@@ -165,7 +165,7 @@ class HomeMate3Plus1Accessory {
       // If no IP provided, resolve/discover the device first
       if (!this.config.ip) {
         this.log.info(`[${this.config.name}] No IP set — discovering device on network...`);
-        await this.device.resolveId();
+        await this.device.find();
         this.log.info(`[${this.config.name}] Device discovered.`);
       }
       await this.device.connect();
