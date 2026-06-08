@@ -114,9 +114,9 @@ class HomeMate3Plus1Accessory {
 
     // Build device options — IP is optional
     const deviceOptions = {
-      id: this.config.id,
-      key: this.config.key,
-      version: this.config.version || '3.3',
+      id: String(this.config.id).trim(),
+      key: String(this.config.key),
+      version: String(this.config.version || '3.3'),
     };
 
     // Only set IP if provided — otherwise tuyapi will auto-discover
