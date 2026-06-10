@@ -2,7 +2,7 @@
   "pluginAlias": "TuyaHomeMate",
   "pluginType": "platform",
   "singular": false,
-  "headerDisplay": "Local LAN control for HomeMate 3+1 Tuya switch/fan panels. The local key is used exactly as entered, so symbol keys are supported.",
+  "headerDisplay": "Local LAN control for HomeMate 3+1 Tuya switch/fan panels with auto-discovery. Devices are automatically discovered on the network - only ID and Key are required. The local key is used exactly as entered, so symbol keys are supported.",
   "schema": {
     "type": "object",
     "properties": {
@@ -10,6 +10,13 @@
         "title": "Platform Name",
         "type": "string",
         "default": "TuyaHomeMate"
+      },
+      "discoverTimeout": {
+        "title": "Device discovery timeout (ms)",
+        "type": "integer",
+        "minimum": 1000,
+        "default": 60000,
+        "description": "Maximum time to wait for device discovery before falling back to manual IP/version settings"
       },
       "devices": {
         "title": "Devices",
@@ -20,8 +27,7 @@
           "required": [
             "name",
             "id",
-            "key",
-            "ip"
+            "key"
           ],
           "properties": {
             "type": {
@@ -59,9 +65,9 @@
               "description": "The Tuya local key. Enter it exactly as provided; do not escape, trim, or convert symbol keys."
             },
             "ip": {
-              "title": "IP Address",
+              "title": "IP Address (Optional)",
               "type": "string",
-              "description": "The device LAN IP address. Use a DHCP reservation so it stays fixed."
+              "description": "Optional. If omitted, auto-discovery will find the device. If provided, will be used directly (faster startup)."
             },
             "port": {
               "title": "Port",
@@ -69,43 +75,6 @@
               "default": 6668,
               "minimum": 1,
               "maximum": 65535
-            },
-            "version": {
-              "title": "Tuya Protocol Version",
-              "type": "string",
-              "default": "3.3",
-              "oneOf": [
-                {
-                  "title": "3.1",
-                  "enum": [
-                    "3.1"
-                  ]
-                },
-                {
-                  "title": "3.2",
-                  "enum": [
-                    "3.2"
-                  ]
-                },
-                {
-                  "title": "3.3",
-                  "enum": [
-                    "3.3"
-                  ]
-                },
-                {
-                  "title": "3.4",
-                  "enum": [
-                    "3.4"
-                  ]
-                },
-                {
-                  "title": "3.5",
-                  "enum": [
-                    "3.5"
-                  ]
-                }
-              ]
             },
             "manufacturer": {
               "title": "Manufacturer",
