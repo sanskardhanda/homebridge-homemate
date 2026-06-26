@@ -2,6 +2,7 @@
 
 const HomeMate3Plus1Accessory = require('./accessories/HomeMate3Plus1Accessory');
 const RGBTWLightV2Accessory   = require('./accessories/RGBTW');
+const SmartPlugAccessory      = require('./accessories/SmartPlug');
 const TuyaDiscovery           = require('./lib/TuyaDiscovery');
 
 const PLUGIN_NAME   = 'homebridge-homemate';
@@ -20,10 +21,31 @@ const HOMEMATE_FAN = {
   speedValues: ['level_1', 'level_2', 'level_3', 'level_4'],
 };
 
-// Add new device types here as you build them
-const CLASS_DEF = {
-  rgbtwlightv2: RGBTWLightV2Accessory,
+// Fixed device capabilities ("properties") per supported device type, so a user
+// only has to enter a name, device id and local key. Any value here can still be
+// overridden per device in the advanced JSON config.
+const WIPRO_BATTEN_DEFAULTS = {
+  dpPower: 20, dpMode: 21, dpBrightness: 22, dpColorTemperature: 23, dpColor: 24,
+  colorFunction: 'HSB', scaleBrightness: 10, scaleWhiteColor: 10,
+  minWhiteColor: 10, maxWhiteColor: 1000,
 };
+const WIPRO_PLUG_DEFAULTS = {
+  dpSwitch: 1, dpCurrent: 18, dpPower: 19, dpVoltage: 20, dpEnergy: 17,
+};
+
+// type → { class, version, fixedVersion, defaults }
+const TYPE_PROFILES = {
+  homemate:     { class: HomeMate3Plus1Accessory, version: '3.3', fixedVersion: true,  defaults: { lights: HOMEMATE_LIGHTS, fan: HOMEMATE_FAN } },
+  smartplug:    { class: SmartPlugAccessory,       version: '3.3', fixedVersion: true,  defaults: WIPRO_PLUG_DEFAULTS },
+  batten:       { class: RGBTWLightV2Accessory,    version: '3.4', fixedVersion: true,  defaults: WIPRO_BATTEN_DEFAULTS },
+  // Legacy generic RGBTW v2 type: version comes from config/discovery.
+  rgbtwlightv2: { class: RGBTWLightV2Accessory,    version: '3.3', fixedVersion: false, defaults: {} },
+};
+// Friendly aliases.
+TYPE_PROFILES.wiprosmartplug = TYPE_PROFILES.smartplug;
+TYPE_PROFILES.outlet         = TYPE_PROFILES.smartplug;
+TYPE_PROFILES.plug           = TYPE_PROFILES.smartplug;
+TYPE_PROFILES.wiprobatten    = TYPE_PROFILES.batten;
 
 module.exports = (homebridge) => {
   homebridge.registerPlatform(PLUGIN_NAME, PLATFORM_NAME, TuyaHomematePlatform);
@@ -48,10 +70,9 @@ class TuyaHomematePlatform {
   }
 
   _initDevicesWithDiscovery() {
-    // Build device map from config for quick lookup
     const deviceMap = new Map();
     const deviceIds = [];
-    
+
     for (const deviceConfig of this.config.devices) {
       if (!deviceConfig.id || !deviceConfig.key) {
         this.log.warn(`Device "${deviceConfig.name || 'Unknown'}" is missing id or key. Skipping.`);
@@ -60,37 +81,45 @@ class TuyaHomematePlatform {
 
       const id = ('' + deviceConfig.id).trim();
       const type = (deviceConfig.type || '').toLowerCase().trim() || 'homemate';
-      const isHomeMate = type === 'homemate';
+      const profile = TYPE_PROFILES[type] || null;
+      const label = deviceConfig.name || `Device ${id.slice(-6)}`;
 
-      if (isHomeMate && deviceConfig.version) {
-        this.log.warn(
-          `[${deviceConfig.name || `Device ${id.slice(-6)}`}] Ignoring configured HomeMate protocol version ` +
-          `"${deviceConfig.version}". HomeMate 3+1 uses discovery/default protocol handling.`
-        );
+      // Resolve protocol version. Known types pin it; warn if a stale config
+      // value disagrees so it cannot silently break control.
+      let version;
+      if (profile && profile.fixedVersion) {
+        if (deviceConfig.version && ('' + deviceConfig.version).trim() !== profile.version) {
+          this.log.warn(
+            `[${label}] Ignoring configured protocol version "${deviceConfig.version}" ` +
+            `for type "${type}"; using ${profile.version}.`
+          );
+        }
+        version = profile.version;
+      } else {
+        version = deviceConfig.version ? ('' + deviceConfig.version).trim() : undefined;
       }
 
+      // Fixed type defaults sit under any explicit per-device overrides.
+      const defaults = (profile && profile.defaults) || {};
+
       deviceMap.set(id, {
+        ...defaults,
         ...deviceConfig,
-        // Normalize values
         id,
-        // Optional override for the local Tuya id used in control writes; falls
-        // back to `id` in the accessory when not set.
+        // Optional override for the local Tuya id used in control writes; the
+        // accessory falls back to `id` when this is unset.
         tuyaId: deviceConfig.tuyaId ? ('' + deviceConfig.tuyaId).trim() : undefined,
         key: String(deviceConfig.key),
         ip: deviceConfig.ip ? ('' + deviceConfig.ip).trim() : undefined,
-        version: isHomeMate ? undefined : (deviceConfig.version ? ('' + deviceConfig.version).trim() : undefined),
+        version,
         type,
-        name: deviceConfig.name || `Device ${id.slice(-6)}`,
+        name: label,
         port: deviceConfig.port || 6668,
-        lights: deviceConfig.lights || HOMEMATE_LIGHTS,
-        fan: deviceConfig.fan || HOMEMATE_FAN,
-        sendEmptyUpdate: isHomeMate ? false : !!deviceConfig.sendEmptyUpdate,
-        dpPower: deviceConfig.dpPower,
-        dpBrightness: deviceConfig.dpBrightness,
-        dpColorTemperature: deviceConfig.dpColorTemperature,
-        dpColor: deviceConfig.dpColor,
+        sendEmptyUpdate: !!deviceConfig.sendEmptyUpdate,
+        _class: profile ? profile.class : HomeMate3Plus1Accessory,
+        _known: !!profile,
       });
-      
+
       deviceIds.push(id);
     }
 
@@ -100,16 +129,13 @@ class TuyaHomematePlatform {
     }
 
     const configuredDevices = new Set();
-    const discoveryResults = new Map();
     const discoveryDeviceIds = [];
 
     for (const deviceId of deviceIds) {
       const deviceConfig = deviceMap.get(deviceId);
 
       if (deviceConfig.ip) {
-        if (!deviceConfig.version) {
-          deviceConfig.version = '3.3';
-        }
+        if (!deviceConfig.version) deviceConfig.version = '3.3';
 
         this.log.info(
           `[${deviceConfig.name}] Configuring with manual IP ` +
@@ -130,111 +156,68 @@ class TuyaHomematePlatform {
 
     this.log.info(`Starting auto-discovery for ${discoveryDeviceIds.length} device(s)...`);
 
-    // Start discovery
-    TuyaDiscovery.start({ 
-      ids: discoveryDeviceIds,
-      log: this.log
-    })
-    .on('discover', (discoveredDevice) => {
-      const deviceId = discoveredDevice.id;
-      
-      if (!deviceMap.has(deviceId)) {
-        this.log.debug(`Discovered device ${deviceId} not in config, ignoring.`);
-        return;
-      }
+    TuyaDiscovery.start({ ids: discoveryDeviceIds, log: this.log })
+      .on('discover', (discoveredDevice) => {
+        const deviceId = discoveredDevice.id;
 
-      if (configuredDevices.has(deviceId)) {
-        // Already configured (either manually or via previous discovery)
-        return;
-      }
+        if (!deviceMap.has(deviceId)) {
+          this.log.debug(`Discovered device ${deviceId} not in config, ignoring.`);
+          return;
+        }
+        if (configuredDevices.has(deviceId)) return;
 
-      const deviceConfig = deviceMap.get(deviceId);
-      
-      // Merge discovered data with config (discovered takes precedence for missing fields)
-      const finalConfig = {
-        ...deviceConfig,
-        // Use discovered IP if we don't have manual IP
-        ...(!deviceConfig.ip && discoveredDevice.ip ? { ip: discoveredDevice.ip } : {}),
-        // Use discovered version if we don't have manual version
-        ...(!deviceConfig.version && discoveredDevice.version ? { version: discoveredDevice.version } : {}),
-      };
+        const deviceConfig = deviceMap.get(deviceId);
+        const finalConfig = {
+          ...deviceConfig,
+          ...(!deviceConfig.ip && discoveredDevice.ip ? { ip: discoveredDevice.ip } : {}),
+          ...(!deviceConfig.version && discoveredDevice.version ? { version: discoveredDevice.version } : {}),
+        };
 
-      this.log.info(
-        `[${finalConfig.name}] ${deviceConfig.ip ? 'Using manual IP' : 'Auto-discovered IP'} ` +
-        `${deviceConfig.version ? 'using manual version' : 'auto-detected version'} ` +
-        `(IP: ${finalConfig.ip || 'unknown'}, Version: ${finalConfig.version || 'unknown'})`
-      );
+        this.log.info(
+          `[${finalConfig.name}] Auto-discovered ` +
+          `(IP: ${finalConfig.ip || 'unknown'}, Version: ${finalConfig.version || 'unknown'})`
+        );
 
-      this._createAndRegisterAccessory(finalConfig);
-      configuredDevices.add(deviceId);
-      discoveryResults.set(deviceId, finalConfig);
-    });
+        this._createAndRegisterAccessory(finalConfig);
+        configuredDevices.add(deviceId);
+      });
 
-    // Handle timeout - configure any remaining devices with manual settings
     setTimeout(() => {
       for (const deviceId of discoveryDeviceIds) {
-        if (!configuredDevices.has(deviceId)) {
-          const deviceConfig = deviceMap.get(deviceId);
-          
-          // Check if we have minimum required info
-          if (!deviceConfig.ip) {
-            this.log.warn(
-              `[${deviceConfig.name}] Device not discovered after timeout and no manual IP provided. ` +
-              `Please ensure device is powered on and connected to network.`
-            );
-            continue;
-          }
-          
-          if (!deviceConfig.version) {
-            this.log.warn(
-              `[${deviceConfig.name}] Device not discovered after timeout and no manual version provided. ` +
-              `Defaulting to version 3.3.`
-            );
-            deviceConfig.version = '3.3';
-          }
+        if (configuredDevices.has(deviceId)) continue;
+        const deviceConfig = deviceMap.get(deviceId);
 
-          this.log.info(
-            `[${deviceConfig.name}] Configuring with manual settings ` +
-            `(IP: ${deviceConfig.ip}, Version: ${deviceConfig.version || '3.3'})`
+        if (!deviceConfig.ip) {
+          this.log.warn(
+            `[${deviceConfig.name}] Device not discovered after timeout and no manual IP provided. ` +
+            `Please ensure the device is powered on and on the same network.`
           );
-          
-          this._createAndRegisterAccessory(deviceConfig);
-          configuredDevices.add(deviceId);
+          continue;
         }
+        if (!deviceConfig.version) deviceConfig.version = '3.3';
+
+        this.log.info(
+          `[${deviceConfig.name}] Configuring with manual settings ` +
+          `(IP: ${deviceConfig.ip}, Version: ${deviceConfig.version})`
+        );
+        this._createAndRegisterAccessory(deviceConfig);
+        configuredDevices.add(deviceId);
       }
-      
-      this.log.info(`Device configuration complete.`);
-    }, this.config.discoverTimeout ?? 60000); // Default 60 second timeout
+      this.log.info('Device configuration complete.');
+    }, this.config.discoverTimeout ?? 60000);
   }
 
   _createAndRegisterAccessory(deviceConfig) {
-    const type = deviceConfig.type || 'homemate';
-    
-    if (type && CLASS_DEF[type]) {
-      // ── Tuya-style accessory (RGBTW bulb etc.) ──
-      this.log.info(`[${deviceConfig.name}] Initialising as type: ${type}`);
-      const AccessoryClass = CLASS_DEF[type];
-      const acc = new AccessoryClass(this.log, deviceConfig, this.api);
-      this.accessories.push(acc);
-      this.api.publishExternalAccessories(PLUGIN_NAME, [acc.accessory]);
-    } else {
-      // ── Default: HomeMate 3+1 panel ──
-      const typeToLog = type && type !== 'homemate' ? type : 'homemate';
-      if (type && type !== 'homemate') {
-        this.log.warn(`[${deviceConfig.name}] Unknown type "${type}" — falling back to HomeMate 3+1`);
-      }
-      
-      const fullConfig = {
-        ...deviceConfig,
-        version: deviceConfig.version || '3.3',
-        lights: deviceConfig.lights || HOMEMATE_LIGHTS,
-        fan:    deviceConfig.fan    || HOMEMATE_FAN,
-      };
-      
-      const acc = new HomeMate3Plus1Accessory(this.log, fullConfig, this.api);
-      this.accessories.push(acc);
-      this.api.publishExternalAccessories(PLUGIN_NAME, [acc.accessory]);
+    const AccessoryClass = deviceConfig._class || HomeMate3Plus1Accessory;
+
+    if (!deviceConfig._known && deviceConfig.type && deviceConfig.type !== 'homemate') {
+      this.log.warn(`[${deviceConfig.name}] Unknown type "${deviceConfig.type}" — using HomeMate 3+1.`);
     }
+    this.log.info(`[${deviceConfig.name}] Initialising as type: ${deviceConfig.type}`);
+
+    const acc = new AccessoryClass(this.log, deviceConfig, this.api);
+    this.accessories.push(acc);
+    this.api.publishExternalAccessories(PLUGIN_NAME, [acc.accessory]);
   }
 
   configureAccessory(accessory) {

@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here.
 
+## 1.2.0 - 2026-06-26
+
+- Added a **Wipro Smart Plug** device type (`type: "smartplug"`): the socket appears as a HomeKit Outlet (on/off + "in use"), plus Eve-compatible power, voltage, current and total-energy characteristics. The stock Apple Home app shows only on/off; energy is visible in apps that read Eve characteristics (Eve, Controller for HomeKit).
+- Added a **Wipro Batten** / RGBTW light device type (`type: "batten"`) on protocol 3.4.
+- Fixed RGBTW colour handling: `colour_data` is now encoded/decoded as the 12-hex `HHHHSSSSVVVV` (HSB) string these devices actually use, instead of JSON. Sending/parsing JSON is what caused the colour shown to differ from the colour selected.
+- Each supported device type now carries its data-point map and protocol version in code, so a device only needs a name, id and key (IP optional).
+
 ## 1.1.8 - 2026-06-26
 
 - Added an optional `tuyaId` override so LAN control can target the device's current local Tuya ID while the HomeKit identity stays tied to the configured `id`. This fixes the case where status updates correctly but control is silently ignored after the device's ID changed (e.g. re-pairing in Smart Life rotates both the local key and the device ID). Control writes addressed to a stale device ID are accepted at the frame level but never actuate the relay.

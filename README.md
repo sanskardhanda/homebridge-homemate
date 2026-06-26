@@ -1,18 +1,26 @@
 # homebridge-homemate
 
-Homebridge plugin for local LAN control of HomeMate 3+1 Tuya switch/fan panels.
+Homebridge plugin for local (cloud-free) LAN control of Tuya / Wipro devices. The data-point map and protocol version are built in for each supported type, so a device only needs a name, id and local key.
 
-The main supported accessory is a HomeMate wall panel with:
+## Supported device types
 
-| DP | Type | Description |
+Set `type` per device. The default is `homemate`.
+
+| `type` | Device | HomeKit |
 | --- | --- | --- |
-| 1 | boolean | Light switch 1 |
-| 2 | boolean | Light switch 2 |
-| 3 | boolean | Light switch 3 |
-| 101 | boolean | Fan on/off |
-| 102 | enum | Fan speed |
+| `homemate` | HomeMate 3+1 switch/fan panel | 3 Switches + a Fan (on/off + speed) |
+| `smartplug` | Wipro / Tuya metering plug | Outlet (on/off, "in use") + Eve power/voltage/current/energy |
+| `batten` | Wipro / Tuya RGBTW light (protocol 3.4) | Lightbulb (on/off, brightness, colour temperature, hue/saturation) |
 
-The three lights appear as individual HomeKit Switch services. The fan appears as a Fan service with an on/off control and a rotation-speed slider.
+The HomeMate 3+1 panel uses fixed data points: lights on DP 1/2/3, fan on DP 101, fan speed (enum) on DP 102. The lights appear as individual Switch services; the fan as a Fan service with an on/off control and a rotation-speed slider.
+
+### Smart plug energy
+
+The Apple Home app does not display power or energy for outlets — it shows only on/off and "in use". This plugin still publishes consumption (W), voltage (V), current (A) and total energy (kWh) as Eve-compatible custom characteristics, so they appear in apps that read them (Eve, Controller for HomeKit). Metering scaling assumes the common Tuya convention (power and voltage ÷10, current ÷1000); adjust per device if your readings look off.
+
+## What Changed In 1.2.0
+
+Version 1.2.0 adds the `smartplug` and `batten` device types and fixes RGBTW colour: `colour_data` is now the 12-hex `HHHHSSSSVVVV` (HSB) string the devices actually use, instead of JSON — which is what made the colour shown differ from the colour selected.
 
 ## What Changed In 1.1.8
 
@@ -64,6 +72,18 @@ Important: do not trim, escape, convert, or validate the local key as hex. Tuya 
           "name": "Living Room Panel",
           "id": "YOUR_DEVICE_ID",
           "key": "YOUR_LOCAL_KEY"
+        },
+        {
+          "name": "Wipro Smart Plug",
+          "type": "smartplug",
+          "id": "PLUG_DEVICE_ID",
+          "key": "PLUG_LOCAL_KEY"
+        },
+        {
+          "name": "Wipro Batten",
+          "type": "batten",
+          "id": "BATTEN_DEVICE_ID",
+          "key": "BATTEN_LOCAL_KEY"
         }
       ]
     }
@@ -76,11 +96,13 @@ Important: do not trim, escape, convert, or validate the local key as hex. Tuya 
 | Field | Required | Description |
 | --- | --- | --- |
 | `name` | Yes | Display name in HomeKit. |
+| `type` | No | `homemate` (default), `smartplug`, or `batten`. Picks the built-in DP map and protocol version. |
 | `id` | Yes | Tuya device ID. Drives the HomeKit identity. |
 | `key` | Yes | Tuya local key, used exactly as entered. |
+| `ip` | No | Device IP. Leave blank to auto-discover; set a reserved IP for the most reliable control. |
 | `tuyaId` | No | Current local Tuya ID (`gwId`) for LAN control. Set only if control fails while state still updates (see Troubleshooting). Falls back to `id`. |
 
-Advanced JSON overrides such as `ip`, `port`, `lights`, and `fan` are still accepted by the code for troubleshooting, but they are intentionally not shown in the Homebridge UI. For HomeMate 3+1 panels, old `version` overrides are ignored so stale values such as `3.1` cannot break writes.
+Per-device advanced overrides (`port`, the various `dp*` numbers, `lights`, `fan`, and the light's `colorFunction` / `scale*` / `minWhiteColor` / `maxWhiteColor`) are accepted by the code but rarely needed, since each `type` ships a working map. Configured protocol `version` is ignored for known types, which pin their own version.
 
 ## Troubleshooting
 

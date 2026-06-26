@@ -7,8 +7,8 @@
  *   DP 20  switch_led        (bool)
  *   DP 21  work_mode         (enum: "white" | "colour" | "scene" | "music")
  *   DP 22  bright_value_v2   (integer 10–1000)
- *   DP 23  temp_value_v2     (integer 0–1000)
- *   DP 24  colour_data_v2    (JSON string: {"h":0–360,"s":0–1000,"v":0–1000})
+ *   DP 23  temp_value_v2     (integer 10–1000)
+ *   DP 24  colour_data_v2    (12-hex HSB string: HHHHSSSSVVVV)
  *
  * Config example:
  * {
@@ -60,6 +60,11 @@ class RGBTWLightV2Accessory {
     this.dpTemp   = parseInt(config.dpColorTemperature) || DP_TEMP;
     this.dpColor  = parseInt(config.dpColor)            || DP_COLOR;
 
+    // White (colour-temperature) DP value range on the device.
+    this.minWhite = parseInt(config.minWhiteColor);
+    if (!Number.isFinite(this.minWhite)) this.minWhite = 0;
+    this.maxWhite = parseInt(config.maxWhiteColor) || 1000;
+
     // Build the platform accessory
     const accessoryUUID = uuid.generate(config.id);
     this.accessory = new api.platformAccessory(config.name, accessoryUUID);
@@ -67,8 +72,8 @@ class RGBTWLightV2Accessory {
 
     // Info service
     this.accessory.getService(Service.AccessoryInformation)
-      .setCharacteristic(Characteristic.Manufacturer, 'Tuya')
-      .setCharacteristic(Characteristic.Model,        'RGB+TW Bulb v2')
+      .setCharacteristic(Characteristic.Manufacturer, config.manufacturer || 'Wipro / Tuya')
+      .setCharacteristic(Characteristic.Model,        config.model || 'RGB+TW Batten')
       .setCharacteristic(Characteristic.SerialNumber,  config.id);
 
     // Lightbulb service
@@ -209,7 +214,7 @@ class RGBTWLightV2Accessory {
       const c = this._parseColor(this.state[this.dpColor]);
       this._charHue.updateValue(c.h);
       this._charSat.updateValue(c.s);
-      this._charBright.updateValue(c.b);
+      this._charBright.updateValue(Math.max(1, c.b)); // HomeKit Brightness min is 1
       this._charTemp.updateValue(370); // neutral placeholder
     }
   }
@@ -221,7 +226,7 @@ class RGBTWLightV2Accessory {
   _getBrightness() {
     if (this.state[this.dpMode] === 'white')
       return this._b2hk(this.state[this.dpBright] || BRIGHT_MIN);
-    return this._parseColor(this.state[this.dpColor]).b;
+    return Math.max(1, this._parseColor(this.state[this.dpColor]).b);
   }
 
   _getTemp() {
@@ -327,9 +332,28 @@ class RGBTWLightV2Accessory {
   //  CONVERSION HELPERS
   // ══════════════════════════════════════
 
-  /** colour_data_v2 JSON → { h:0-360, s:0-100, b:0-100 } */
+  /**
+   * colour_data_v2 → { h:0-360, s:0-100, b:0-100 }.
+   *
+   * This batten (and most v2 Tuya RGBTW devices) encodes colour as the 12-hex
+   * "HSB" string HHHHSSSSVVVV — hue 0-360, saturation 0-1000, value 0-1000, each
+   * as a 4-char big-endian hex word (e.g. "00bc03e80000"). Earlier builds of this
+   * accessory wrongly sent/parsed JSON, which the device silently misread and is
+   * what caused the colour shown to differ from the colour selected. The JSON
+   * branch is kept only as a fallback for firmwares that report that format.
+   */
   _parseColor(raw) {
     if (!raw) return { h: 0, s: 100, b: 100 };
+    if (typeof raw === 'string' && raw.trim()[0] !== '{') {
+      const hex = raw.trim();
+      if (hex.length >= 12) {
+        return {
+          h: Math.min(360, parseInt(hex.slice(0, 4), 16) || 0),
+          s: Math.round((parseInt(hex.slice(4, 8), 16) || 0) / 10),
+          b: Math.round((parseInt(hex.slice(8, 12), 16) || 0) / 10),
+        };
+      }
+    }
     try {
       const o = typeof raw === 'string' ? JSON.parse(raw) : raw;
       return {
@@ -340,13 +364,13 @@ class RGBTWLightV2Accessory {
     } catch { return { h: 0, s: 100, b: 100 }; }
   }
 
-  /** { h:0-360, s:0-100, b:0-100 } → colour_data_v2 JSON string */
+  /** { h:0-360, s:0-100, b:0-100 } → 12-hex HHHHSSSSVVVV colour_data string */
   _buildColor(h, s, b) {
-    return JSON.stringify({
-      h: Math.round(h),
-      s: Math.round(s * 10),
-      v: Math.round(b * 10),
-    });
+    const H = Math.max(0, Math.min(360, Math.round(h)));
+    const S = Math.max(0, Math.min(1000, Math.round(s * 10)));
+    const V = Math.max(0, Math.min(1000, Math.round(b * 10)));
+    const hx = (n) => n.toString(16).padStart(4, '0');
+    return hx(H) + hx(S) + hx(V);
   }
 
   /** Tuya bright 10-1000 → HomeKit 1-100 */
@@ -369,9 +393,10 @@ class RGBTWLightV2Accessory {
     return Math.round(500 - (Math.max(0, Math.min(1000, v)) / 1000) * 360);
   }
 
-  /** HomeKit mireds 140-500 → Tuya temp 0-1000 */
+  /** HomeKit mireds 140-500 → Tuya temp, clamped to the device's white range */
   _hk2t(v) {
-    return Math.round((500 - Math.max(140, Math.min(500, v))) / 360 * 1000);
+    const raw = Math.round((500 - Math.max(140, Math.min(500, v))) / 360 * 1000);
+    return Math.max(this.minWhite, Math.min(this.maxWhite, raw));
   }
 
   /** HomeKit mireds → approximate { h, s } for hue/sat display */

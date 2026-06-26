@@ -1,10 +1,10 @@
 {
   "name": "homebridge-homemate",
-  "version": "1.1.8",
+  "version": "1.2.0",
   "description": "Homebridge plugin for Tuya HomeMate 3+1 switch panels and related Tuya LAN accessories",
   "main": "index.js",
   "scripts": {
-    "test": "node --check index.js && node --check accessories/HomeMate3Plus1Accessory.js && node --check accessories/RGBTW.js && node --check lib/TuyaLanDevice.js"
+    "test": "node --check index.js && node --check accessories/HomeMate3Plus1Accessory.js && node --check accessories/RGBTW.js && node --check accessories/SmartPlug.js && node --check lib/TuyaLanDevice.js"
   },
   "keywords": [
     "homebridge-plugin",
