@@ -1,6 +1,11 @@
 'use strict';
 
-const TuyaLanDevice = require('../lib/TuyaLanDevice');
+let TuyaDevice;
+try {
+  TuyaDevice = require('tuyapi');
+} catch (e) {
+  // Will warn at runtime.
+}
 
 const RECONNECT_DELAY = 5000;
 const POLL_INTERVAL = 10000;
@@ -80,59 +85,85 @@ class HomeMate3Plus1Accessory {
   // ─── Tuya Connection ──────────────────────────────────────────────────────
 
   _setupTuya() {
-    if (!this.config.ip) {
-      this.log.error(`[${this.config.name}] Manual IP is required for reliable HomeMate LAN control.`);
+    if (!TuyaDevice) {
+      this.log.error('homebridge-homemate: tuyapi is not installed. Run: npm install tuyapi');
       return;
     }
 
     const deviceOptions = {
-      name: this.config.name,
       id: String(this.config.id).trim(),
       key: String(this.config.key),
       version: String(this.config.version || '3.3'),
-      ip: String(this.config.ip).trim(),
-      port: Number(this.config.port || 6668),
-      log: this.log,
-      sendEmptyUpdate: !!this.config.sendEmptyUpdate,
     };
 
-    this.device = new TuyaLanDevice(deviceOptions);
+    if (this.config.ip) {
+      deviceOptions.ip = String(this.config.ip).trim();
+    }
 
-    this.device.on('connect', () => {
+    if (this.config.port) {
+      deviceOptions.port = Number(this.config.port);
+    }
+
+    this.device = new TuyaDevice(deviceOptions);
+
+    this.device.on('connected', () => {
       this.log.info(`[${this.config.name}] Device connected.`);
       this._connected = true;
       clearTimeout(this._reconnectTimer);
+      this.device.get({ schema: true }).catch((error) => {
+        this.log.warn(`[${this.config.name}] Initial get failed:`, error.message || error);
+      });
     });
 
-    this.device.on('change', (changes, state) => {
-      this.log.debug(`[${this.config.name}] Received data:`, JSON.stringify(changes));
-      this._updateState(state);
+    this.device.on('data', (data) => {
+      if (!data || !data.dps) {
+        return;
+      }
+
+      this.log.debug(`[${this.config.name}] Received data:`, JSON.stringify(data.dps));
+      this._updateState(data.dps);
     });
 
-    this.device.on('disconnect', () => {
+    this.device.on('disconnected', () => {
       this.log.warn(`[${this.config.name}] Device disconnected. Reconnecting...`);
       this._connected = false;
+      this._scheduleReconnect();
     });
 
     this.device.on('error', (err) => {
+      const message = err && err.message ? err.message : String(err);
+
+      if (message.includes('Timeout waiting for status response')) {
+        this.log.warn(`[${this.config.name}] Ignoring set response timeout; command was sent.`);
+        return;
+      }
+
       this._connected = false;
-      this.log.warn(`[${this.config.name}] Device error:`, err && err.message ? err.message : err);
+      this.log.warn(`[${this.config.name}] Device error:`, message);
+      this._scheduleReconnect();
     });
 
     this._connect();
 
     this._pollTimer = setInterval(() => {
       if (this.device && this._connected) {
-        this.device.update();
+        this.device.get({ schema: true }).catch(() => {});
       }
     }, POLL_INTERVAL);
   }
 
-  _connect() {
+  async _connect() {
     this._connected = false;
 
     try {
-      this.device.connect();
+      if (!this.config.ip) {
+        this.log.info(`[${this.config.name}] No IP set - discovering device on network...`);
+        await this.device.find();
+        this.log.info(`[${this.config.name}] Device discovered.`);
+      }
+
+      await this.device.connect();
+      this._connected = true;
     } catch (err) {
       this.log.error(`[${this.config.name}] Connection failed:`, err.message || err);
       this._scheduleReconnect();
@@ -323,12 +354,26 @@ class HomeMate3Plus1Accessory {
 
     this.log.debug(`[${this.config.name}] Sending DPS:`, JSON.stringify(normalized));
 
-    const sent = this.device.update(normalized);
-    if (!sent) {
-      this.log.warn(`[${this.config.name}] DPS write was not sent; device socket is not connected.`);
-      this._connected = false;
-      this._scheduleReconnect();
+    try {
+      await this.device.set({
+        multiple: true,
+        data: normalized,
+        shouldWaitForResponse: false,
+      });
+    } catch (err) {
+      const message = err && err.message ? err.message : String(err);
+
+      if (message.includes('Timeout waiting for status response')) {
+        this.log.warn(`[${this.config.name}] DPS write timed out waiting for status response; keeping connection open.`);
+      } else {
+        this.log.error(`[${this.config.name}] Failed to send DPS:`, message);
+        this._connected = false;
+        this._scheduleReconnect();
+        throw err;
+      }
     }
+
+    this._updateState(normalized);
 
     await new Promise((resolve) => setTimeout(resolve, COMMAND_GAP));
   }

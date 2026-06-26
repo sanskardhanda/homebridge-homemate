@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented here.
 
+## 1.1.6 - 2026-06-26
+
+- Restored the HomeMate 3+1 command path to TuyAPI, matching the last known-good 1.0.7 write behavior instead of the custom LAN sender.
+- Kept symbol local keys as raw strings and sent HomeMate DPS writes without waiting for a status acknowledgement.
+
+## 1.1.5 - 2026-06-26
+
+- Ignored stale hidden `version` overrides for fixed HomeMate 3+1 panels so old configs such as `3.1` cannot break LAN writes after the UI was simplified.
+- Disabled the experimental empty follow-up control write for HomeMate 3+1 panels.
+
 ## 1.1.4 - 2026-06-26
 
 - Simplified the Homebridge UI schema for HomeMate 3+1 devices to only ask for device name, Tuya device ID, and local key.

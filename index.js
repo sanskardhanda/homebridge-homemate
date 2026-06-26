@@ -59,19 +59,29 @@ class TuyaHomematePlatform {
       }
 
       const id = ('' + deviceConfig.id).trim();
+      const type = (deviceConfig.type || '').toLowerCase().trim() || 'homemate';
+      const isHomeMate = type === 'homemate';
+
+      if (isHomeMate && deviceConfig.version) {
+        this.log.warn(
+          `[${deviceConfig.name || `Device ${id.slice(-6)}`}] Ignoring configured HomeMate protocol version ` +
+          `"${deviceConfig.version}". HomeMate 3+1 uses discovery/default protocol handling.`
+        );
+      }
+
       deviceMap.set(id, {
         ...deviceConfig,
         // Normalize values
         id,
         key: String(deviceConfig.key),
         ip: deviceConfig.ip ? ('' + deviceConfig.ip).trim() : undefined,
-        version: deviceConfig.version ? ('' + deviceConfig.version).trim() : undefined,
-        type: (deviceConfig.type || '').toLowerCase().trim() || 'homemate',
+        version: isHomeMate ? undefined : (deviceConfig.version ? ('' + deviceConfig.version).trim() : undefined),
+        type,
         name: deviceConfig.name || `Device ${id.slice(-6)}`,
         port: deviceConfig.port || 6668,
         lights: deviceConfig.lights || HOMEMATE_LIGHTS,
         fan: deviceConfig.fan || HOMEMATE_FAN,
-        sendEmptyUpdate: !!deviceConfig.sendEmptyUpdate,
+        sendEmptyUpdate: isHomeMate ? false : !!deviceConfig.sendEmptyUpdate,
         dpPower: deviceConfig.dpPower,
         dpBrightness: deviceConfig.dpBrightness,
         dpColorTemperature: deviceConfig.dpColorTemperature,

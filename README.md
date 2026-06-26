@@ -14,16 +14,11 @@ The main supported accessory is a HomeMate wall panel with:
 
 The three lights appear as individual HomeKit Switch services. The fan appears as a Fan service with an on/off control and a rotation-speed slider.
 
-## What Changed In 1.1.4
+## What Changed In 1.1.6
 
-Version 1.1.4 keeps the Homebridge UI simple for the fixed HomeMate 3+1 panel: add the device name, Tuya device ID, and local key. The plugin handles discovery, protocol version, and the known HomeMate DP map internally.
+Version 1.1.6 keeps the Homebridge UI simple for the fixed HomeMate 3+1 panel: add the device name, Tuya device ID, and local key. The plugin handles discovery, protocol version, and the known HomeMate DP map internally, and ignores stale hidden HomeMate `version` overrides left behind by older configs.
 
-The LAN client sends raw Tuya control frames:
-
-| Protocol | Control command |
-| --- | --- |
-| 3.1 / 3.2 / 3.3 | DP update command 7 |
-| 3.4 / 3.5 | DP update command 13 with protocol wrapper |
+HomeMate 3+1 DPS writes use TuyAPI, matching the last known-good 1.0.7 command path, but local keys are still treated as raw strings and write calls do not wait for a status acknowledgement from devices that ignore the response.
 
 Local keys are treated as raw strings. Keys containing symbols are supported and must be entered exactly as provided.
 
@@ -31,7 +26,7 @@ Local keys are treated as raw strings. Keys containing symbols are supported and
 
 - Homebridge: `^1.8.0` or `^2.0.0`
 - Node.js: `^22.12.0` or `^24.0.0`
-- Tuya LAN protocol versions: `3.1`, `3.2`, `3.3`, `3.4`, `3.5`
+- Tuya LAN protocol version for HomeMate 3+1: `3.3` by default
 
 ## Installation
 
@@ -80,13 +75,13 @@ Important: do not trim, escape, convert, or validate the local key as hex. Tuya 
 | `id` | Yes | Tuya device ID. |
 | `key` | Yes | Tuya local key, used exactly as entered. |
 
-Advanced JSON overrides such as `ip`, `version`, `port`, `lights`, and `fan` are still accepted by the code for troubleshooting, but they are intentionally not shown in the Homebridge UI.
+Advanced JSON overrides such as `ip`, `port`, `lights`, and `fan` are still accepted by the code for troubleshooting, but they are intentionally not shown in the Homebridge UI. For HomeMate 3+1 panels, old `version` overrides are ignored so stale values such as `3.1` cannot break writes.
 
 ## Troubleshooting
 
 ### Device reads state but commands do not work
 
-Check the configured `version` first. Reads and writes use different Tuya LAN commands on newer protocol versions, so a device can appear readable while rejecting control frames if the version is wrong.
+Remove any old HomeMate `version` entry from `config.json` if you edited it manually. The plugin ignores stale HomeMate protocol overrides and will use discovery/default protocol handling instead.
 
 For this HomeMate panel, the expected cloud property mapping is:
 
