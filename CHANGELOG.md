@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented here.
 
+## 1.1.3 - 2026-06-26
+
+- Made Tuya protocol version truly optional in the Homebridge UI schema so leaving it blank uses auto-detection.
+- Updated the README example to omit manual `version` by default.
+
 ## 1.1.2 - 2026-06-26
 
 - Matched HomeMate 3.3 control payloads to the `homebridge-tuya-plus` LAN sender by removing `gwId` from DP write commands.

@@ -79,8 +79,8 @@
             "version": {
               "title": "Tuya Protocol Version",
               "type": "string",
-              "default": "3.3",
-              "description": "Set this manually if auto-discovery reports the wrong protocol version or commands read state but do not apply.",
+              "placeholder": "Auto-detect",
+              "description": "Optional. Leave blank for auto-detection. Set manually only if auto-discovery reports the wrong protocol version or commands read state but do not apply.",
               "oneOf": [
                 {
                   "title": "3.1",
