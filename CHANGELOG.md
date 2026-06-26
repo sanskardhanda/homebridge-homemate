@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented here.
 
+## 1.2.1 - 2026-06-26
+
+- Smart plug now exposes a standard, HomeKit- and Matter-compliant Outlet (on/off + "in use") by default. The Eve power/voltage/current/energy characteristics are custom (non-standard) and could make Apple Home reject the accessory with a compatibility error, so they are now opt-in via `"exposeEnergy": true`.
+- Documented Homebridge 2.x support and how these (standards-compliant) accessories relate to Matter.
+
 ## 1.2.0 - 2026-06-26
 
 - Added a **Wipro Smart Plug** device type (`type: "smartplug"`): the socket appears as a HomeKit Outlet (on/off + "in use"), plus Eve-compatible power, voltage, current and total-energy characteristics. The stock Apple Home app shows only on/off; energy is visible in apps that read Eve characteristics (Eve, Controller for HomeKit).

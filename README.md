@@ -16,7 +16,9 @@ The HomeMate 3+1 panel uses fixed data points: lights on DP 1/2/3, fan on DP 101
 
 ### Smart plug energy
 
-The Apple Home app does not display power or energy for outlets — it shows only on/off and "in use". This plugin still publishes consumption (W), voltage (V), current (A) and total energy (kWh) as Eve-compatible custom characteristics, so they appear in apps that read them (Eve, Controller for HomeKit). Metering scaling assumes the common Tuya convention (power and voltage ÷10, current ÷1000); adjust per device if your readings look off.
+The Apple Home app does not display power or energy for outlets — it shows only on/off and "in use" — and those readings are exposed through non-standard (Eve) characteristics that are not part of HomeKit or Matter. On strict Home/HAP versions they can even make the accessory fail to add ("not compatible/compliant"). So by default the plug is a plain, compliant Outlet.
+
+To expose consumption (W), voltage (V), current (A) and total energy (kWh) as Eve-compatible characteristics — visible in apps that read them (Eve, Controller for HomeKit) — set `"exposeEnergy": true` on the device. Metering assumes the common Tuya convention (power and voltage ÷10, current ÷1000); adjust the `dp*` overrides if your readings look off.
 
 ## What Changed In 1.2.0
 
@@ -36,9 +38,23 @@ Local keys are treated as raw strings. Keys containing symbols are supported and
 
 ## Compatibility
 
-- Homebridge: `^1.8.0` or `^2.0.0`
+- Homebridge: `^1.8.0` or `^2.0.0` (tested on Homebridge 2.x / HAP-NodeJS 2.x)
 - Node.js: `^22.12.0` or `^24.0.0`
-- Tuya LAN protocol version for HomeMate 3+1: `3.3` by default
+- Tuya LAN protocol: `3.3` (HomeMate panel, smart plug) and `3.4` (batten), handled per type
+
+### Homebridge 2.0 and Matter
+
+Every accessory uses only standard HomeKit services and characteristics, so they pass Apple Home's stricter validation on Homebridge 2.x and map cleanly to Matter device types:
+
+| Accessory | HomeKit service | Matter equivalent |
+| --- | --- | --- |
+| HomeMate panel | Switch ×3 + Fan | On/Off + Fan |
+| Smart plug | Outlet | On/Off Plug-in Unit |
+| Batten | Lightbulb (brightness + colour temperature + hue/saturation) | Extended Color Light |
+
+Homebridge bridges to **Apple HomeKit (HAP), not Matter directly**. To use these devices over Matter, put a HomeKit→Matter bridge in front (for example expose them through Home Assistant's Matter integration, or run a Matter-native bridge). Keeping the accessories standards-compliant — no custom characteristics — is what lets them cross that bridge cleanly, which is why smart-plug energy metering is opt-in (see above).
+
+Note: HAP 2.x validates accessory/service names. Custom HomeMate light names made only of digits or symbols (e.g. `"1"`) trigger a name warning in the log; give each light a name containing a letter to silence it.
 
 ## Installation
 
@@ -101,6 +117,7 @@ Important: do not trim, escape, convert, or validate the local key as hex. Tuya 
 | `key` | Yes | Tuya local key, used exactly as entered. |
 | `ip` | No | Device IP. Leave blank to auto-discover; set a reserved IP for the most reliable control. |
 | `tuyaId` | No | Current local Tuya ID (`gwId`) for LAN control. Set only if control fails while state still updates (see Troubleshooting). Falls back to `id`. |
+| `exposeEnergy` | No | `smartplug` only. `true` adds Eve power/voltage/current/energy characteristics. Off by default because they are non-standard and can break adding the accessory in Apple Home. |
 
 Per-device advanced overrides (`port`, the various `dp*` numbers, `lights`, `fan`, and the light's `colorFunction` / `scale*` / `minWhiteColor` / `maxWhiteColor`) are accepted by the code but rarely needed, since each `type` ships a working map. Configured protocol `version` is ignored for known types, which pin their own version.
 

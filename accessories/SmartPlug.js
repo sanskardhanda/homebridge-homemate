@@ -98,8 +98,7 @@ class SmartPlugAccessory {
     this.dpVoltage = parseInt(config.dpVoltage, 10) || DP_VOLTAGE;
     this.dpEnergy = parseInt(config.dpEnergy, 10) || DP_ENERGY;
 
-    const Eve = defineEveCharacteristics(Characteristic, Formats, Perms);
-    this.Eve = Eve;
+    this.exposeEnergy = config.exposeEnergy === true;
 
     const accessoryUUID = uuid.generate(config.id);
     this.accessory = new api.platformAccessory(config.name, accessoryUUID);
@@ -117,13 +116,25 @@ class SmartPlugAccessory {
     svc.getCharacteristic(Characteristic.OutletInUse)
       .onGet(() => this._inUse());
 
-    // Add Eve energy characteristics to the outlet service.
-    for (const C of [Eve.CurrentConsumption, Eve.Voltage, Eve.ElectricCurrent, Eve.TotalConsumption]) {
-      if (!svc.testCharacteristic(C)) svc.addCharacteristic(C);
-    }
     this.outletService = svc;
 
-    this.log.info(`Registered Wipro Smart Plug: "${config.name}" (switch DP ${this.dpSwitch}, metering DPs ${this.dpPower}/${this.dpVoltage}/${this.dpCurrent})`);
+    // Energy metering uses non-standard (Eve) characteristics, which can make an
+    // accessory fail Apple Home's stricter validation and are not representable
+    // in Matter. It is therefore opt-in (exposeEnergy: true); by default the plug
+    // exposes only the standard, HomeKit-/Matter-compliant outlet on/off.
+    this.Eve = null;
+    if (this.exposeEnergy) {
+      const Eve = defineEveCharacteristics(Characteristic, Formats, Perms);
+      this.Eve = Eve;
+      for (const C of [Eve.CurrentConsumption, Eve.Voltage, Eve.ElectricCurrent, Eve.TotalConsumption]) {
+        if (!svc.testCharacteristic(C)) svc.addCharacteristic(C);
+      }
+    }
+
+    this.log.info(
+      `Registered Wipro Smart Plug: "${config.name}" (switch DP ${this.dpSwitch}` +
+      (this.exposeEnergy ? `, Eve energy DPs ${this.dpPower}/${this.dpVoltage}/${this.dpCurrent}` : '') + ')'
+    );
 
     this._setupTuya();
   }
@@ -236,11 +247,16 @@ class SmartPlugAccessory {
 
     if (dps[this.dpSwitch] !== undefined) {
       this.outletService.updateCharacteristic(Characteristic.On, !!dps[this.dpSwitch]);
+    }
+    // OutletInUse is a standard characteristic; keep it current from power draw.
+    if (dps[this.dpSwitch] !== undefined || dps[this.dpPower] !== undefined) {
       this.outletService.updateCharacteristic(Characteristic.OutletInUse, this._inUse());
     }
+
+    if (!this.exposeEnergy || !this.Eve) return;
+
     if (dps[this.dpPower] !== undefined) {
       this.outletService.updateCharacteristic(this.Eve.CurrentConsumption, Math.max(0, Number(dps[this.dpPower]) / 10));
-      this.outletService.updateCharacteristic(Characteristic.OutletInUse, this._inUse());
     }
     if (dps[this.dpVoltage] !== undefined) {
       this.outletService.updateCharacteristic(this.Eve.Voltage, Math.max(0, Number(dps[this.dpVoltage]) / 10));
