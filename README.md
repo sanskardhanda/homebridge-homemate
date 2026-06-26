@@ -14,9 +14,9 @@ The main supported accessory is a HomeMate wall panel with:
 
 The three lights appear as individual HomeKit Switch services. The fan appears as a Fan service with an on/off control and a rotation-speed slider.
 
-## What Changed In 1.1.0
+## What Changed In 1.1.2
 
-Version 1.1.0 uses an internal Tuya LAN client for the HomeMate panel instead of relying on `tuyapi.set()` acknowledgements. This matters for HomeMate/Tuya panels that read state correctly but do not reliably return the status response expected by `tuyapi` after a command.
+Version 1.1.2 uses an internal Tuya LAN client for the HomeMate panel instead of relying on `tuyapi.set()` acknowledgements. This matters for HomeMate/Tuya panels that read state correctly but do not reliably return the status response expected by `tuyapi` after a command.
 
 The LAN client sends raw Tuya control frames:
 
@@ -47,8 +47,8 @@ You need:
 
 - Tuya device ID
 - Tuya local key
-- Device LAN IP address
-- Tuya protocol version, usually `3.3` for this panel unless your discovery tool reports another version
+- Device LAN IP address, or auto-discovery on the same network
+- Tuya protocol version, usually `3.3` for this panel unless discovery or your local key tool reports another version
 
 Use the Tuya IoT platform, a supported local key tool, or your existing Homebridge/Tuya workflow to obtain the ID and key. Reserve the device IP in your router so it does not change.
 
@@ -98,7 +98,7 @@ Important: do not trim, escape, convert, or validate the local key as hex. Tuya 
 | `name` | Yes | Display name in HomeKit. |
 | `id` | Yes | Tuya device ID. |
 | `key` | Yes | Tuya local key, used exactly as entered. |
-| `ip` | Yes | Device LAN IP address. |
+| `ip` | No | Device LAN IP address. If omitted, auto-discovery will try to find it. |
 | `port` | No | Tuya LAN port. Defaults to `6668`. |
 | `version` | No | Tuya protocol version: `3.1`, `3.2`, `3.3`, `3.4`, or `3.5`. Defaults to `3.3`. |
 | `sendEmptyUpdate` | No | Sends an empty follow-up control frame after DP writes. Leave off unless your device specifically needs it. |

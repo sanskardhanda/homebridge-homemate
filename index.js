@@ -63,7 +63,7 @@ class TuyaHomematePlatform {
         ...deviceConfig,
         // Normalize values
         id,
-        key: ('' + deviceConfig.key).trim(),
+        key: String(deviceConfig.key),
         ip: deviceConfig.ip ? ('' + deviceConfig.ip).trim() : undefined,
         version: deviceConfig.version ? ('' + deviceConfig.version).trim() : undefined,
         type: (deviceConfig.type || '').toLowerCase().trim() || 'homemate',

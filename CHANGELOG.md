@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented here.
 
+## 1.1.2 - 2026-06-26
+
+- Matched HomeMate 3.3 control payloads to the `homebridge-tuya-plus` LAN sender by removing `gwId` from DP write commands.
+- Stopped trimming configured Tuya local keys during platform setup.
+- Restored the Tuya protocol version selector in the Homebridge UI schema.
+- Fixed the v3.5 UDP discovery probe prefix.
+
+## 1.1.1 - 2026-06-10
+
+- Added UDP auto-discovery for Tuya LAN devices.
+- Made IP optional when discovery can find the device.
+
 ## 1.1.0 - 2026-06-08
 
 - Replaced the HomeMate command path with a direct Tuya LAN client so DP writes do not depend on `tuyapi.set()` status acknowledgements.

@@ -76,6 +76,44 @@
               "minimum": 1,
               "maximum": 65535
             },
+            "version": {
+              "title": "Tuya Protocol Version",
+              "type": "string",
+              "default": "3.3",
+              "description": "Set this manually if auto-discovery reports the wrong protocol version or commands read state but do not apply.",
+              "oneOf": [
+                {
+                  "title": "3.1",
+                  "enum": [
+                    "3.1"
+                  ]
+                },
+                {
+                  "title": "3.2",
+                  "enum": [
+                    "3.2"
+                  ]
+                },
+                {
+                  "title": "3.3",
+                  "enum": [
+                    "3.3"
+                  ]
+                },
+                {
+                  "title": "3.4",
+                  "enum": [
+                    "3.4"
+                  ]
+                },
+                {
+                  "title": "3.5",
+                  "enum": [
+                    "3.5"
+                  ]
+                }
+              ]
+            },
             "manufacturer": {
               "title": "Manufacturer",
               "type": "string",
