@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented here.
 
+## 1.1.4 - 2026-06-26
+
+- Simplified the Homebridge UI schema for HomeMate 3+1 devices to only ask for device name, Tuya device ID, and local key.
+- Kept fixed HomeMate DP defaults and advanced JSON overrides in code without exposing them as normal UI fields.
+
 ## 1.1.3 - 2026-06-26
 
 - Made Tuya protocol version truly optional in the Homebridge UI schema so leaving it blank uses auto-detection.

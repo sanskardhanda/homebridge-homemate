@@ -14,9 +14,9 @@ The main supported accessory is a HomeMate wall panel with:
 
 The three lights appear as individual HomeKit Switch services. The fan appears as a Fan service with an on/off control and a rotation-speed slider.
 
-## What Changed In 1.1.2
+## What Changed In 1.1.4
 
-Version 1.1.2 uses an internal Tuya LAN client for the HomeMate panel instead of relying on `tuyapi.set()` acknowledgements. This matters for HomeMate/Tuya panels that read state correctly but do not reliably return the status response expected by `tuyapi` after a command.
+Version 1.1.4 keeps the Homebridge UI simple for the fixed HomeMate 3+1 panel: add the device name, Tuya device ID, and local key. The plugin handles discovery, protocol version, and the known HomeMate DP map internally.
 
 The LAN client sends raw Tuya control frames:
 
@@ -47,10 +47,8 @@ You need:
 
 - Tuya device ID
 - Tuya local key
-- Device LAN IP address, or auto-discovery on the same network
-- Tuya protocol version, auto-detected by default unless you set it manually
 
-Use the Tuya IoT platform, a supported local key tool, or your existing Homebridge/Tuya workflow to obtain the ID and key. Reserve the device IP in your router so it does not change.
+Use the Tuya IoT platform, a supported local key tool, or your existing Homebridge/Tuya workflow to obtain the ID and key.
 
 Important: do not trim, escape, convert, or validate the local key as hex. Tuya local keys can contain symbols such as quotes, angle brackets, ampersands, and backticks.
 
@@ -64,24 +62,9 @@ Important: do not trim, escape, convert, or validate the local key as hex. Tuya 
       "name": "TuyaHomeMate",
       "devices": [
         {
-          "type": "homemate",
           "name": "Living Room Panel",
           "id": "YOUR_DEVICE_ID",
-          "key": "YOUR_LOCAL_KEY",
-          "ip": "192.168.1.123",
-          "manufacturer": "HomeMate",
-          "model": "3+1 Wall Switch",
-          "lights": [
-            { "name": "Main Light", "dp": 1 },
-            { "name": "Side Light", "dp": 2 },
-            { "name": "Accent Light", "dp": 3 }
-          ],
-          "fan": {
-            "name": "Ceiling Fan",
-            "dpSwitch": 101,
-            "dpSpeed": 102,
-            "speedValues": ["level_1", "level_2", "level_3", "level_4"]
-          }
+          "key": "YOUR_LOCAL_KEY"
         }
       ]
     }
@@ -93,18 +76,11 @@ Important: do not trim, escape, convert, or validate the local key as hex. Tuya 
 
 | Field | Required | Description |
 | --- | --- | --- |
-| `type` | No | Use `homemate` for the HomeMate 3+1 panel. Defaults to `homemate`. |
 | `name` | Yes | Display name in HomeKit. |
 | `id` | Yes | Tuya device ID. |
 | `key` | Yes | Tuya local key, used exactly as entered. |
-| `ip` | No | Device LAN IP address. If omitted, auto-discovery will try to find it. |
-| `port` | No | Tuya LAN port. Defaults to `6668`. |
-| `version` | No | Tuya protocol version: `3.1`, `3.2`, `3.3`, `3.4`, or `3.5`. Leave blank for auto-detection. |
-| `sendEmptyUpdate` | No | Sends an empty follow-up control frame after DP writes. Leave off unless your device specifically needs it. |
-| `lights` | No | Array of `{ "name": "...", "dp": 1 }` switch definitions. Defaults to DP 1, 2, and 3. |
-| `fan.dpSwitch` | No | Fan on/off DP. Defaults to `101`. |
-| `fan.dpSpeed` | No | Fan speed enum DP. Defaults to `102`. |
-| `fan.speedValues` | No | Speed enum values from slow to fast. Defaults to `["level_1","level_2","level_3","level_4"]`. |
+
+Advanced JSON overrides such as `ip`, `version`, `port`, `lights`, and `fan` are still accepted by the code for troubleshooting, but they are intentionally not shown in the Homebridge UI.
 
 ## Troubleshooting
 

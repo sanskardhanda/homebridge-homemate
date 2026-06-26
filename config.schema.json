@@ -2,7 +2,7 @@
   "pluginAlias": "TuyaHomeMate",
   "pluginType": "platform",
   "singular": false,
-  "headerDisplay": "Local LAN control for HomeMate 3+1 Tuya switch/fan panels with auto-discovery. Devices are automatically discovered on the network - only ID and Key are required. The local key is used exactly as entered, so symbol keys are supported.",
+  "headerDisplay": "Local LAN control for HomeMate 3+1 Tuya switch/fan panels. Add the device name, Tuya device ID, and local key; the plugin handles discovery, protocol version, and the fixed HomeMate DP map.",
   "schema": {
     "type": "object",
     "properties": {
@@ -11,18 +11,11 @@
         "type": "string",
         "default": "TuyaHomeMate"
       },
-      "discoverTimeout": {
-        "title": "Device discovery timeout (ms)",
-        "type": "integer",
-        "minimum": 1000,
-        "default": 60000,
-        "description": "Maximum time to wait for device discovery before falling back to manual IP/version settings"
-      },
       "devices": {
         "title": "Devices",
         "type": "array",
         "items": {
-          "title": "Device",
+          "title": "HomeMate 3+1 Device",
           "type": "object",
           "required": [
             "name",
@@ -30,25 +23,6 @@
             "key"
           ],
           "properties": {
-            "type": {
-              "title": "Accessory Type",
-              "type": "string",
-              "default": "homemate",
-              "oneOf": [
-                {
-                  "title": "HomeMate 3+1 Switch/Fan Panel",
-                  "enum": [
-                    "homemate"
-                  ]
-                },
-                {
-                  "title": "RGB+TW Bulb v2",
-                  "enum": [
-                    "rgbtwlightv2"
-                  ]
-                }
-              ]
-            },
             "name": {
               "title": "Device Name",
               "type": "string",
@@ -62,149 +36,7 @@
             "key": {
               "title": "Local Key",
               "type": "string",
-              "description": "The Tuya local key. Enter it exactly as provided; do not escape, trim, or convert symbol keys."
-            },
-            "ip": {
-              "title": "IP Address (Optional)",
-              "type": "string",
-              "description": "Optional. If omitted, auto-discovery will find the device. If provided, will be used directly (faster startup)."
-            },
-            "port": {
-              "title": "Port",
-              "type": "integer",
-              "default": 6668,
-              "minimum": 1,
-              "maximum": 65535
-            },
-            "version": {
-              "title": "Tuya Protocol Version",
-              "type": "string",
-              "placeholder": "Auto-detect",
-              "description": "Optional. Leave blank for auto-detection. Set manually only if auto-discovery reports the wrong protocol version or commands read state but do not apply.",
-              "oneOf": [
-                {
-                  "title": "3.1",
-                  "enum": [
-                    "3.1"
-                  ]
-                },
-                {
-                  "title": "3.2",
-                  "enum": [
-                    "3.2"
-                  ]
-                },
-                {
-                  "title": "3.3",
-                  "enum": [
-                    "3.3"
-                  ]
-                },
-                {
-                  "title": "3.4",
-                  "enum": [
-                    "3.4"
-                  ]
-                },
-                {
-                  "title": "3.5",
-                  "enum": [
-                    "3.5"
-                  ]
-                }
-              ]
-            },
-            "manufacturer": {
-              "title": "Manufacturer",
-              "type": "string",
-              "default": "HomeMate / Tuya"
-            },
-            "model": {
-              "title": "Model",
-              "type": "string",
-              "default": "HomeMate 3+1 Switch"
-            },
-            "sendEmptyUpdate": {
-              "title": "Send Empty Update Signature",
-              "type": "boolean",
-              "default": false,
-              "description": "Enable only for devices that require an empty follow-up control frame after a DP write."
-            },
-            "lights": {
-              "title": "HomeMate Light Switches",
-              "type": "array",
-              "items": {
-                "type": "object",
-                "required": [
-                  "name",
-                  "dp"
-                ],
-                "properties": {
-                  "name": {
-                    "title": "Light Name",
-                    "type": "string"
-                  },
-                  "dp": {
-                    "title": "Switch DP",
-                    "type": "integer",
-                    "default": 1
-                  }
-                }
-              }
-            },
-            "fan": {
-              "title": "HomeMate Fan",
-              "type": "object",
-              "properties": {
-                "name": {
-                  "title": "Fan Name",
-                  "type": "string",
-                  "default": "Fan"
-                },
-                "dpSwitch": {
-                  "title": "Fan Switch DP",
-                  "type": "integer",
-                  "default": 101
-                },
-                "dpSpeed": {
-                  "title": "Fan Speed DP",
-                  "type": "integer",
-                  "default": 102
-                },
-                "speedValues": {
-                  "title": "Fan Speed Values",
-                  "type": "array",
-                  "default": [
-                    "level_1",
-                    "level_2",
-                    "level_3",
-                    "level_4"
-                  ],
-                  "items": {
-                    "type": "string"
-                  }
-                }
-              }
-            },
-            "dpPower": {
-              "title": "RGBTW Power DP",
-              "type": "integer",
-              "default": 20
-            },
-            "dpBrightness": {
-              "title": "RGBTW Brightness DP",
-              "type": "integer",
-              "default": 22
-            },
-            "dpColorTemperature": {
-              "title": "RGBTW Color Temperature DP",
-              "type": "integer",
-              "default": 23
-            },
-            "dpColor": {
-              "title": "RGBTW Color DP",
-              "type": "integer",
-              "default": 24
+              "description": "The Tuya local key. Enter it exactly as provided; symbol keys are supported."
             }
           }
         }
