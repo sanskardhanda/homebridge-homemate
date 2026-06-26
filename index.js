@@ -96,15 +96,40 @@ class TuyaHomematePlatform {
       return;
     }
 
-    this.log.info(`Starting auto-discovery for ${deviceIds.length} device(s)...`);
-    
-    // Track which devices we've configured via discovery vs manual
     const configuredDevices = new Set();
     const discoveryResults = new Map();
+    const discoveryDeviceIds = [];
+
+    for (const deviceId of deviceIds) {
+      const deviceConfig = deviceMap.get(deviceId);
+
+      if (deviceConfig.ip) {
+        if (!deviceConfig.version) {
+          deviceConfig.version = '3.3';
+        }
+
+        this.log.info(
+          `[${deviceConfig.name}] Configuring with manual IP ` +
+          `(IP: ${deviceConfig.ip}, Version: ${deviceConfig.version})`
+        );
+
+        this._createAndRegisterAccessory(deviceConfig);
+        configuredDevices.add(deviceId);
+      } else {
+        discoveryDeviceIds.push(deviceId);
+      }
+    }
+
+    if (discoveryDeviceIds.length === 0) {
+      this.log.info('Device configuration complete.');
+      return;
+    }
+
+    this.log.info(`Starting auto-discovery for ${discoveryDeviceIds.length} device(s)...`);
 
     // Start discovery
     TuyaDiscovery.start({ 
-      ids: deviceIds,
+      ids: discoveryDeviceIds,
       log: this.log
     })
     .on('discover', (discoveredDevice) => {
@@ -144,7 +169,7 @@ class TuyaHomematePlatform {
 
     // Handle timeout - configure any remaining devices with manual settings
     setTimeout(() => {
-      for (const deviceId of deviceIds) {
+      for (const deviceId of discoveryDeviceIds) {
         if (!configuredDevices.has(deviceId)) {
           const deviceConfig = deviceMap.get(deviceId);
           

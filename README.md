@@ -14,9 +14,9 @@ The main supported accessory is a HomeMate wall panel with:
 
 The three lights appear as individual HomeKit Switch services. The fan appears as a Fan service with an on/off control and a rotation-speed slider.
 
-## What Changed In 1.1.6
+## What Changed In 1.1.7
 
-Version 1.1.6 keeps the Homebridge UI simple for the fixed HomeMate 3+1 panel: add the device name, Tuya device ID, and local key. The plugin handles discovery, protocol version, and the known HomeMate DP map internally, and ignores stale hidden HomeMate `version` overrides left behind by older configs.
+Version 1.1.7 keeps the Homebridge UI simple for the fixed HomeMate 3+1 panel: add the device name, Tuya device ID, and local key. The plugin handles discovery, protocol version, and the known HomeMate DP map internally, ignores stale hidden HomeMate `version` overrides left behind by older configs, and skips discovery entirely when a manual IP is configured.
 
 HomeMate 3+1 DPS writes use TuyAPI, matching the last known-good 1.0.7 command path, but local keys are still treated as raw strings and write calls do not wait for a status acknowledgement from devices that ignore the response.
 

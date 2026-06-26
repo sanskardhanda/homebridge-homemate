@@ -2,6 +2,10 @@
 
 All notable changes to this project are documented here.
 
+## 1.1.7 - 2026-06-26
+
+- Configured HomeMate devices with a manual IP immediately instead of starting UDP discovery first.
+
 ## 1.1.6 - 2026-06-26
 
 - Restored the HomeMate 3+1 command path to TuyAPI, matching the last known-good 1.0.7 write behavior instead of the custom LAN sender.
