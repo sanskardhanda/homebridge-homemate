@@ -37,6 +37,11 @@
               "title": "Local Key",
               "type": "string",
               "description": "The Tuya local key. Enter it exactly as provided; symbol keys are supported."
+            },
+            "tuyaId": {
+              "title": "Local Device ID Override (advanced)",
+              "type": "string",
+              "description": "Optional. The device's CURRENT local Tuya ID (gwId) used for LAN control. Set this only if the device's state updates correctly but it will not respond to control — e.g. after re-pairing in Smart Life, which changes the device ID. Find it with 'tinytuya scan'. Leave blank to use the Device ID above."
             }
           }
         }

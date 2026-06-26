@@ -14,6 +14,10 @@ The main supported accessory is a HomeMate wall panel with:
 
 The three lights appear as individual HomeKit Switch services. The fan appears as a Fan service with an on/off control and a rotation-speed slider.
 
+## What Changed In 1.1.8
+
+Version 1.1.8 adds an optional `tuyaId` override for the case where a device reports state correctly but ignores control after its local Tuya ID changed (e.g. re-pairing in Smart Life). See [Troubleshooting](#device-reads-state-but-commands-do-not-work).
+
 ## What Changed In 1.1.7
 
 Version 1.1.7 keeps the Homebridge UI simple for the fixed HomeMate 3+1 panel: add the device name, Tuya device ID, and local key. The plugin handles discovery, protocol version, and the known HomeMate DP map internally, ignores stale hidden HomeMate `version` overrides left behind by older configs, and skips discovery entirely when a manual IP is configured.
@@ -72,8 +76,9 @@ Important: do not trim, escape, convert, or validate the local key as hex. Tuya 
 | Field | Required | Description |
 | --- | --- | --- |
 | `name` | Yes | Display name in HomeKit. |
-| `id` | Yes | Tuya device ID. |
+| `id` | Yes | Tuya device ID. Drives the HomeKit identity. |
 | `key` | Yes | Tuya local key, used exactly as entered. |
+| `tuyaId` | No | Current local Tuya ID (`gwId`) for LAN control. Set only if control fails while state still updates (see Troubleshooting). Falls back to `id`. |
 
 Advanced JSON overrides such as `ip`, `port`, `lights`, and `fan` are still accepted by the code for troubleshooting, but they are intentionally not shown in the Homebridge UI. For HomeMate 3+1 panels, old `version` overrides are ignored so stale values such as `3.1` cannot break writes.
 
@@ -81,7 +86,26 @@ Advanced JSON overrides such as `ip`, `port`, `lights`, and `fan` are still acce
 
 ### Device reads state but commands do not work
 
-Remove any old HomeMate `version` entry from `config.json` if you edited it manually. The plugin ignores stale HomeMate protocol overrides and will use discovery/default protocol handling instead.
+If HomeKit shows the correct state (physical on/off is reflected) but commands from the Home app do nothing, the most common cause is a **stale device ID**. Re-pairing the device in Smart Life / Tuya rotates **both** the local key **and** the device ID — if you only updated the key, the configured `id` no longer matches the device. Status reads still work (a status query is answered based on the local key), but control writes carry the old `id`, so the device accepts the packet and silently ignores it.
+
+To fix it, find the device's current local ID (`gwId`) and set it as `tuyaId`:
+
+```bash
+python -m tinytuya scan      # shows each device's gwId, ip, and version
+```
+
+```json
+{
+  "name": "Living Room Panel",
+  "id": "YOUR_DEVICE_ID",
+  "tuyaId": "CURRENT_LOCAL_GWID",
+  "key": "YOUR_LOCAL_KEY"
+}
+```
+
+`tuyaId` is used only for LAN control; `id` still drives the HomeKit identity, so setting `tuyaId` avoids re-adding the accessory in the Home app. (You can instead just update `id` to the current value, but the accessory will be re-published and you will need to re-add it.) The log line `Using local Tuya id ... for control` confirms the override is active.
+
+Also remove any old HomeMate `version` entry from `config.json` if you edited it manually. The plugin ignores stale HomeMate protocol overrides and will use discovery/default protocol handling instead.
 
 For this HomeMate panel, the expected cloud property mapping is:
 

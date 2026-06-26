@@ -114,9 +114,20 @@ class RGBTWLightV2Accessory {
       return;
     }
 
+    // `tuyaId` overrides the local Tuya id used for LAN control while `config.id`
+    // continues to drive the HomeKit identity (see HomeMate3Plus1Accessory for the
+    // re-pairing scenario this handles).
+    const tuyaId = String(this.config.tuyaId || this.config.id).trim();
+    if (tuyaId !== String(this.config.id).trim()) {
+      this.log.info(
+        `[${this.config.name}] Using local Tuya id ${tuyaId} for control ` +
+        `(HomeKit identity derived from ${this.config.id}).`,
+      );
+    }
+
     const opts = {
       name: this.config.name,
-      id: String(this.config.id).trim(),
+      id: tuyaId,
       key: String(this.config.key),
       version: String(this.config.version || '3.3'),
       ip: String(this.config.ip).trim(),

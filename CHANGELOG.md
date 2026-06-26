@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented here.
 
+## 1.1.8 - 2026-06-26
+
+- Added an optional `tuyaId` override so LAN control can target the device's current local Tuya ID while the HomeKit identity stays tied to the configured `id`. This fixes the case where status updates correctly but control is silently ignored after the device's ID changed (e.g. re-pairing in Smart Life rotates both the local key and the device ID). Control writes addressed to a stale device ID are accepted at the frame level but never actuate the relay.
+- Logged which local Tuya ID is used for control when it differs from the configured ID.
+
 ## 1.1.7 - 2026-06-26
 
 - Configured HomeMate devices with a manual IP immediately instead of starting UDP discovery first.

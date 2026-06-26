@@ -90,8 +90,23 @@ class HomeMate3Plus1Accessory {
       return;
     }
 
+    // The Tuya protocol device id ("gwId") is what the device checks when it
+    // receives a control write — a write addressed to the wrong id is accepted at
+    // the frame level but silently ignored (state still reads fine). This id can
+    // diverge from `config.id` after re-pairing the device in Smart Life, which
+    // rotates both the local key AND the device id. Allow an optional `tuyaId`
+    // override so HomeKit identity (derived from `config.id`) stays stable while
+    // LAN control targets the device's current local id.
+    const tuyaId = String(this.config.tuyaId || this.config.id).trim();
+    if (tuyaId !== String(this.config.id).trim()) {
+      this.log.info(
+        `[${this.config.name}] Using local Tuya id ${tuyaId} for control ` +
+        `(HomeKit identity derived from ${this.config.id}).`,
+      );
+    }
+
     const deviceOptions = {
-      id: String(this.config.id).trim(),
+      id: tuyaId,
       key: String(this.config.key),
       version: String(this.config.version || '3.3'),
     };

@@ -73,6 +73,9 @@ class TuyaHomematePlatform {
         ...deviceConfig,
         // Normalize values
         id,
+        // Optional override for the local Tuya id used in control writes; falls
+        // back to `id` in the accessory when not set.
+        tuyaId: deviceConfig.tuyaId ? ('' + deviceConfig.tuyaId).trim() : undefined,
         key: String(deviceConfig.key),
         ip: deviceConfig.ip ? ('' + deviceConfig.ip).trim() : undefined,
         version: isHomeMate ? undefined : (deviceConfig.version ? ('' + deviceConfig.version).trim() : undefined),
