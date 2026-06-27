@@ -130,6 +130,11 @@ class TuyaHomematePlatform {
 
     const configuredDevices = new Set();
     const discoveryDeviceIds = [];
+    // Devices are discovered by the id they BROADCAST, which is the real local
+    // gwId — i.e. `tuyaId` when set (it can differ from the HomeKit `id`, e.g. the
+    // HomeMate panel). Map each broadcast id back to its configured id so a device
+    // with no manual IP can still be found.
+    const broadcastToConfigId = new Map();
 
     for (const deviceId of deviceIds) {
       const deviceConfig = deviceMap.get(deviceId);
@@ -145,7 +150,9 @@ class TuyaHomematePlatform {
         this._createAndRegisterAccessory(deviceConfig);
         configuredDevices.add(deviceId);
       } else {
-        discoveryDeviceIds.push(deviceId);
+        const broadcastId = deviceConfig.tuyaId || deviceConfig.id;
+        broadcastToConfigId.set(broadcastId, deviceId);
+        discoveryDeviceIds.push(broadcastId);
       }
     }
 
@@ -158,15 +165,15 @@ class TuyaHomematePlatform {
 
     TuyaDiscovery.start({ ids: discoveryDeviceIds, log: this.log })
       .on('discover', (discoveredDevice) => {
-        const deviceId = discoveredDevice.id;
+        const configId = broadcastToConfigId.get(discoveredDevice.id);
 
-        if (!deviceMap.has(deviceId)) {
-          this.log.debug(`Discovered device ${deviceId} not in config, ignoring.`);
+        if (!configId) {
+          this.log.debug(`Discovered device ${discoveredDevice.id} not in config, ignoring.`);
           return;
         }
-        if (configuredDevices.has(deviceId)) return;
+        if (configuredDevices.has(configId)) return;
 
-        const deviceConfig = deviceMap.get(deviceId);
+        const deviceConfig = deviceMap.get(configId);
         const finalConfig = {
           ...deviceConfig,
           ...(!deviceConfig.ip && discoveredDevice.ip ? { ip: discoveredDevice.ip } : {}),
@@ -179,11 +186,12 @@ class TuyaHomematePlatform {
         );
 
         this._createAndRegisterAccessory(finalConfig);
-        configuredDevices.add(deviceId);
+        configuredDevices.add(configId);
       });
 
     setTimeout(() => {
-      for (const deviceId of discoveryDeviceIds) {
+      for (const broadcastId of discoveryDeviceIds) {
+        const deviceId = broadcastToConfigId.get(broadcastId);
         if (configuredDevices.has(deviceId)) continue;
         const deviceConfig = deviceMap.get(deviceId);
 

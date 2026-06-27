@@ -2,6 +2,10 @@
 
 All notable changes to this project are documented here.
 
+## 1.2.2 - 2026-06-26
+
+- Auto-discovery now matches a device by the local id it actually broadcasts (`tuyaId` when set), not just the configured `id`. A device whose broadcast gwId differs from its HomeKit `id` — e.g. the HomeMate panel after re-pairing — can now be found with no manual IP. Previously such a device silently failed to register if its IP was removed from the config (for example by editing it down to just id and key in the UI).
+
 ## 1.2.1 - 2026-06-26
 
 - Smart plug now exposes a standard, HomeKit- and Matter-compliant Outlet (on/off + "in use") by default. The Eve power/voltage/current/energy characteristics are custom (non-standard) and could make Apple Home reject the accessory with a compatibility error, so they are now opt-in via `"exposeEnergy": true`.
