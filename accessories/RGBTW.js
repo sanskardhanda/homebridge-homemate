@@ -106,6 +106,13 @@ class RGBTWLightV2Accessory {
       .onGet(() => this._getSat())
       .onSet((v) => this._setHueSat({ s: v }));
 
+    // Adaptive Lighting — HomeKit automatically adjusts colour temperature
+    // throughout the day; our _setTemp handler already switches to white mode.
+    if (typeof api.hap.AdaptiveLightingController === 'function') {
+      this._adaptiveLighting = new api.hap.AdaptiveLightingController(svc);
+      this.accessory.configureController(this._adaptiveLighting);
+    }
+
     this._setupTuya();
   }
 

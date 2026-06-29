@@ -2,7 +2,7 @@
   "pluginAlias": "TuyaHomeMate",
   "pluginType": "platform",
   "singular": false,
-  "headerDisplay": "Local LAN control for HomeMate 3+1 Tuya switch/fan panels. Add the device name, Tuya device ID, and local key; the plugin handles discovery, protocol version, and the fixed HomeMate DP map.",
+  "headerDisplay": "Local LAN control for Tuya/HomeMate devices — 3+1 switch panels, Wipro Smart Plug, and Wipro Batten/RGBTW lights. Enter the device name, type, Tuya device ID and local key. IP and protocol version are auto-discovered.",
   "schema": {
     "type": "object",
     "properties": {
@@ -15,7 +15,7 @@
         "title": "Devices",
         "type": "array",
         "items": {
-          "title": "HomeMate 3+1 Device",
+          "title": "Device",
           "type": "object",
           "required": [
             "name",
@@ -33,31 +33,37 @@
               "type": "string",
               "default": "homemate",
               "oneOf": [
-                { "title": "HomeMate 3+1 Switch / Fan Panel", "enum": ["homemate"] },
-                { "title": "Wipro Smart Plug (metering)", "enum": ["smartplug"] },
-                { "title": "Wipro Batten / RGBTW Light", "enum": ["batten"] }
+                { "title": "HomeMate 3+1 Switch / Fan Panel", "const": "homemate" },
+                { "title": "Wipro Smart Plug (metering)", "const": "smartplug" },
+                { "title": "Wipro Batten / RGBTW Light", "const": "batten" }
               ],
-              "description": "The data-point map and protocol version are built in for each type, so you only need the device ID and local key."
+              "description": "The data-point map and protocol version are built in for each type."
             },
             "id": {
               "title": "Tuya Device ID",
               "type": "string",
-              "description": "The local Tuya device ID."
+              "description": "The Tuya device ID (from the Smart Life / Tuya app)."
             },
             "key": {
               "title": "Local Key",
               "type": "string",
               "description": "The Tuya local key. Enter it exactly as provided; symbol keys are supported."
             },
-            "tuyaId": {
-              "title": "Local Device ID Override (advanced)",
-              "type": "string",
-              "description": "Optional. The device's CURRENT local Tuya ID (gwId) used for LAN control. Set this only if the device's state updates correctly but it will not respond to control — e.g. after re-pairing in Smart Life, which changes the device ID. Find it with 'tinytuya scan'. Leave blank to use the Device ID above."
-            },
             "ip": {
               "title": "IP Address (optional)",
               "type": "string",
-              "description": "Optional. Leave blank to auto-discover on the LAN. Set a static/reserved IP for the most reliable control."
+              "description": "Leave blank to auto-discover on the LAN. Set a static/reserved IP for instant startup — recommended for the HomeMate panel."
+            },
+            "exposeEnergy": {
+              "title": "Expose Energy Metering (Smart Plug only)",
+              "type": "boolean",
+              "default": false,
+              "description": "Enable Eve-compatible power, voltage, current and energy characteristics. Visible in Eve or Controller for HomeKit. Disable for full Matter/Apple Home compliance."
+            },
+            "tuyaId": {
+              "title": "Local Device ID Override (advanced)",
+              "type": "string",
+              "description": "Set only if state reads correctly but control does nothing after re-pairing in Smart Life. Enter the current local gwId (find with 'tinytuya scan'). Leave blank normally."
             }
           }
         }

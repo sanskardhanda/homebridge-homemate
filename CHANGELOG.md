@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented here.
 
+## 1.2.3 - 2026-06-29
+
+- Added Adaptive Lighting support to the Wipro Batten / RGBTW accessory. HomeKit now automatically adjusts colour temperature throughout the day when Adaptive Lighting is enabled on the light. The light switches to white mode during adaptive updates; colour mode is preserved when set manually.
+- Fixed Homebridge UI config schema: corrected dropdown rendering for device type (was using `enum` array, now uses `const`), updated header to cover all supported device types, added `exposeEnergy` toggle for the smart plug, moved the advanced `tuyaId` field to the bottom.
+
 ## 1.2.2 - 2026-06-26
 
 - Auto-discovery now matches a device by the local id it actually broadcasts (`tuyaId` when set), not just the configured `id`. A device whose broadcast gwId differs from its HomeKit `id` — e.g. the HomeMate panel after re-pairing — can now be found with no manual IP. Previously such a device silently failed to register if its IP was removed from the config (for example by editing it down to just id and key in the UI).

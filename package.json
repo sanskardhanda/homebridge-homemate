@@ -1,6 +1,6 @@
 {
   "name": "homebridge-homemate",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "Homebridge plugin for Tuya HomeMate 3+1 switch panels and related Tuya LAN accessories",
   "main": "index.js",
   "scripts": {
